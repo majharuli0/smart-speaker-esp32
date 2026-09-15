@@ -1,1 +1,7 @@
 node_modules
+
+# Runtime data the server generates locally (pairings, uploaded sound
+# files and their manifest) — instance-specific, not source.
+backend/claims.json
+backend/sounds.json
+backend/sounds/

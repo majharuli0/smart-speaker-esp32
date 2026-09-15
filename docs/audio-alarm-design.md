@@ -171,8 +171,10 @@ The server treats every `sd_report`/`sd_status` as authoritative and overwrites 
 
 ## Status
 
-Design only — nothing in this document is implemented yet. It builds on the currently-working LED demo (Wi-Fi provisioning, mDNS discovery, device pairing/ownership, targeted WebSocket commands), documented in [`../README.md`](../README.md). Still open before implementation:
+**Largely implemented** — see [`../README.md`](../README.md) (Milestone 6 and the "Sounds: upload, storage, and playback" section) for the actual, current protocol and setup steps. One deliberate deviation from this document plus what's still open:
 
-- Final hardware tier for audio output (loudness vs. cost/effort — see prior discussion; doesn't block the software design above).
-- Loop vs. one-shot playback behavior, and whether that's per-sound or global.
-- Whether volume is fixed or adjustable from the frontend.
+- **Storage medium: SPI NOR flash chip (W25Q64JV), not an SD card.** Same rationale (local persistent storage, device is the source of truth), same FAT-filesystem approach, same temp-file-then-atomic-rename sync pattern — just different physical hardware than originally sketched here. The message protocol below (`sync_file`, `sync_result`, `play_sound`, etc.) is otherwise implemented close to as designed, with `sd_report`/`sd_status` renamed to `fs_report` to match.
+- **Not yet implemented**: periodic (~30-60s) background presence/status re-check (Flow 4) — currently only reports on WebSocket (re)connect and after each sync/delete. Mid-playback `stop_sound` also doesn't interrupt an already-blocking playback loop yet (see README's Notes section).
+- Loop vs. one-shot playback behavior, and whether that's per-sound or global — still open.
+- Whether volume is fixed or adjustable from the frontend — still open.
+- Final hardware tier for audio output (loudness vs. cost/effort) — resolved in practice: a MAX98357A I2S amp + small speaker, wired and working.

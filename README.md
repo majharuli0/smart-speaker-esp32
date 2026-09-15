@@ -1,9 +1,30 @@
-# LED Demo — browser button → server → ESP32 LED
+# Smart Speaker (ESP32) — browser → server → device
 
-Everything runs on your LAN: laptop server + ESP32 on the same Wi-Fi. Nothing is hardcoded in the ESP32 sketch anymore — no SSID, no password, no server IP.
+**Project vision:** a Wi-Fi-connected smart speaker built on the ESP32 — pairable from a browser, with its own local sound library (upload once, plays without needing the network at playback time) and a speaker loud enough to be useful around a room. Everything below — Wi-Fi provisioning, pairing/ownership, the LED, the I2S amp, the flash-backed sound storage — is the hardware/protocol foundation that vision is built on, developed and verified one working piece at a time rather than all at once.
+
+The **LED flash** was the very first milestone (proving the browser → server → device round-trip worked at all, before any audio hardware existed) — it still exists as a quick sanity check ("is the device even alive and connected?") and costs nothing to keep, but it's no longer what this project is about.
+
+Everything runs on your LAN: laptop server + ESP32 on the same Wi-Fi. Nothing is hardcoded in the ESP32 sketch — no SSID, no password, no server IP.
 
 - **Wi-Fi**: the ESP32 gets it from you, once, via its own setup portal (details below). Saved to flash after that.
 - **Server address**: the ESP32 finds the server automatically via mDNS (`led-server.local`), so it keeps working even if the laptop's IP changes.
+
+## Project structure
+
+```
+led-demo/              (folder name is legacy from the original LED proof-of-concept — see note above)
+├── backend/           Node/Express server: WebSocket relay, pairing, sound upload + manifest
+│   ├── server.js
+│   ├── claims.json     generated at runtime — pairing data, not source (gitignored)
+│   ├── sounds.json      generated at runtime — sound manifest, not source (gitignored)
+│   └── sounds/           generated at runtime — uploaded audio files (gitignored)
+├── frontend/          Static browser page served by the backend (pairing, device controls, Sounds panel)
+├── esp32/
+│   ├── esp32.ino        main firmware: Wi-Fi, WebSocket client, LED, I2S speaker, flash storage
+│   └── format_flash/    one-time sketch to format a fresh flash chip (run once, see Milestone 6)
+└── docs/
+    └── audio-alarm-design.md   original design doc the sound-storage feature grew out of
+```
 
 ## 1. Start the server
 

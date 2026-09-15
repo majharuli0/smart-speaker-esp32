@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>LED Demo</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --border: #dfe3e8;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --danger: #dc2626;
+    --ok-bg: #dcfce7; --ok-fg: #166534;
+    --pending-bg: #fef9c3; --pending-fg: #854d0e;
+    --failed-bg: #fee2e2; --failed-fg: #991b1b;
+    --missing-bg: #ffedd5; --missing-fg: #9a3412;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem 1rem 4rem;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.25rem; }
+  h1 { font-size: 1.4rem; margin: 0; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+  }
+  .card h2 { font-size: 0.95rem; margin: 0 0 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  label { font-size: 0.9rem; }
+  input[type="text"], input[type="file"], select {
+    font: inherit;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    color: var(--text);
+  }
+  button {
+    font: inherit;
+    padding: 0.4rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: var(--accent-hover); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.danger { color: var(--danger); border-color: var(--danger); background: #fff; }
+  .row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .status-line { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; min-height: 1.1em; }
+  #status.connected { color: var(--ok-fg); }
+  #status.disconnected { color: var(--failed-fg); }
+  ul#soundsList { list-style: none; margin: 0.75rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+  .sound-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; }
+  .sound-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.92rem; }
+  .badge { font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px; white-space: nowrap; }
+  .status-ready { background: var(--ok-bg); color: var(--ok-fg); }
+  .status-pending { background: var(--pending-bg); color: var(--pending-fg); }
+  .status-failed { background: var(--failed-bg); color: var(--failed-fg); }
+  .status-missing { background: var(--missing-bg); color: var(--missing-fg); }
+  .empty { color: var(--muted); font-size: 0.9rem; padding: 0.5rem 0; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>ESP32 LED Demo</h1>
+
+    <div class="card">
+      <h2>Pairing</h2>
+      <div class="row">
+        <label for="pairInput">Pair a device (paste the ID shown on its setup portal):</label>
+      </div>
+      <div class="row" style="margin-top:0.4rem">
+        <input id="pairInput" type="text" placeholder="esp32-AABBCCDDEEFF">
+        <button id="pair">Pair</button>
+        <span id="pairStatus" class="status-line" style="min-height:auto"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Device</h2>
+      <div class="row">
+        <select id="device"><option value="">(none paired)</option></select>
+        <button id="flash">Flash LED</button>
+        <button id="playsound">Play Sound</button>
+        <button id="resetwifi">Reconfigure Wi-Fi</button>
+      </div>
+      <p id="status" class="status-line">connecting…</p>
+    </div>
+
+    <div class="card">
+      <h2>Sounds</h2>
+      <div class="row">
+        <input id="soundFile" type="file" accept="audio/wav,.wav">
+        <button id="uploadSound" class="primary">Upload</button>
+      </div>
+      <p id="uploadStatus" class="status-line"></p>
+      <ul id="soundsList"><li class="empty">Select a device to see its sounds</li></ul>
+    </div>
+  </div>
+
+  <script>
+    const status = document.getElementById('status');
+    const deviceSelect = document.getElementById('device');
+    const pairStatus = document.getElementById('pairStatus');
+    const soundFileInput = document.getElementById('soundFile');
+    const uploadBtn = document.getElementById('uploadSound');
+    const uploadStatus = document.getElementById('uploadStatus');
+    const soundsList = document.getElementById('soundsList');
+
+    // deviceId -> last known sounds array, so switching the dropdown
+    // re-renders instantly instead of waiting on a round-trip.
+    const soundsByDevice = {};
+
+    let clientId = localStorage.getItem('clientId');
+    if (!clientId) {
+      clientId = crypto.randomUUID();
+      localStorage.setItem('clientId', clientId);
+    }
+
+    const ws = new WebSocket(`ws://${location.host}`);
+
+    ws.onopen = () => {
+      status.textContent = 'connected';
+      status.className = 'status-line connected';
+      ws.send(JSON.stringify({ type: 'hello', role: 'browser', clientId }));
+    };
+    ws.onclose = () => {
+      status.textContent = 'disconnected';
+      status.className = 'status-line disconnected';
+    };
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      }[c]));
+    }
+
+    function renderSounds(sounds) {
+      soundsList.innerHTML = '';
+      if (!sounds || sounds.length === 0) {
+        soundsList.innerHTML = '<li class="empty">No sounds uploaded yet</li>';
+        return;
+      }
+      sounds.forEach((s) => {
+        const li = document.createElement('li');
+        li.className = 'sound-row';
+        const reasonText = s.reason ? `: ${s.reason}` : '';
+        li.innerHTML = `
+          <span class="sound-name" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span>
+          <span class="badge status-${escapeHtml(s.status)}">${escapeHtml(s.status)}${escapeHtml(reasonText)}</span>
+          <button class="play-btn" ${s.status === 'ready' ? '' : 'disabled'}>Play</button>
+          <button class="delete-btn danger">Delete</button>
+        `;
+        li.querySelector('.play-btn').onclick = () => sendCommand('play_sound', { id: s.id });
+        li.querySelector('.delete-btn').onclick = () => {
+          if (confirm(`Delete "${s.name}"?`)) sendCommand('delete_sound', { id: s.id });
+        };
+        soundsList.appendChild(li);
+      });
+    }
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+
+      if (msg.type === 'devices') {
+        const previous = deviceSelect.value;
+        deviceSelect.innerHTML = '';
+        if (msg.devices.length === 0) {
+          deviceSelect.innerHTML = '<option value="">(none paired)</option>';
+        }
+        msg.devices.forEach((id) => {
+          const opt = document.createElement('option');
+          opt.value = id;
+          opt.textContent = id;
+          deviceSelect.appendChild(opt);
+        });
+        if (msg.devices.includes(previous)) {
+          deviceSelect.value = previous;
+        } else {
+          deviceSelect.dispatchEvent(new Event('change'));
+        }
+      }
+
+      if (msg.type === 'claim_result') {
+        pairStatus.textContent = msg.ok ? `Paired ${msg.deviceId}` : `Failed: ${msg.message}`;
+      }
+
+      if (msg.type === 'sounds') {
+        soundsByDevice[msg.deviceId] = msg.sounds;
+        if (msg.deviceId === deviceSelect.value) renderSounds(msg.sounds);
+      }
+
+      if (msg.type === 'play_failed') {
+        uploadStatus.textContent = `Playback failed (${msg.id}): ${msg.reason}`;
+      }
+    };
+
+    function sendCommand(type, extra = {}) {
+      const target = deviceSelect.value;
+      if (!target) { alert('No device selected'); return; }
+      ws.send(JSON.stringify({ type, target, ...extra }));
+    }
+
+    document.getElementById('flash').onclick = () => sendCommand('flash');
+    document.getElementById('playsound').onclick = () => sendCommand('play_sound');
+    document.getElementById('resetwifi').onclick = () => {
+      if (confirm('Device will forget its Wi-Fi and reopen the LED-Demo-Setup portal. Continue?')) {
+        sendCommand('reset_wifi');
+      }
+    };
+    document.getElementById('pair').onclick = () => {
+      const deviceId = document.getElementById('pairInput').value.trim();
+      if (!deviceId) return;
+      ws.send(JSON.stringify({ type: 'claim_device', deviceId, clientId }));
+    };
+
+    deviceSelect.addEventListener('change', () => {
+      const target = deviceSelect.value;
+      if (!target) { renderSounds([]); return; }
+      renderSounds(soundsByDevice[target] || []);
+      ws.send(JSON.stringify({ type: 'list_sounds', target }));
+    });
+
+    uploadBtn.onclick = async () => {
+      const target = deviceSelect.value;
+      const file = soundFileInput.files[0];
+      if (!target) { alert('No device selected'); return; }
+      if (!file) { alert('Choose a .wav file first'); return; }
+
+      uploadBtn.disabled = true;
+      uploadStatus.textContent = 'Uploading…';
+      try {
+        const res = await fetch(`/upload/${encodeURIComponent(target)}?clientId=${encodeURIComponent(clientId)}`, {
+          method: 'POST',
+          headers: { 'X-Filename': file.name },
+          body: file,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
+        uploadStatus.textContent = 'Uploaded — syncing to device…';
+        soundFileInput.value = '';
+      } catch (e) {
+        uploadStatus.textContent = `Error: ${e.message}`;
+      } finally {
+        uploadBtn.disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>

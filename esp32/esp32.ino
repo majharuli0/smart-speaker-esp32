@@ -39,7 +39,7 @@
 // default pins (SCK=18, MISO=19, MOSI=23) already match the physical
 // wiring, so the global `SPI` object needs no custom SPI.begin() pins —
 // only chip-select is board-specific.
-#define FLASH_CS_GPIO 4
+#define FLASH_CS_GPIO 5
 
 WebSocketsClient webSocket;
 WiFiManager wm;
@@ -82,27 +82,34 @@ static void i2sSetup() {
 
 // Fresh W25Q64JV chips (or ones formatted with something other than
 // FAT12/16) won't mount — that's a one-time setup step, not a wiring bug.
-// See the Adafruit_SPIFlash library's "SdFat_format" example sketch: flash
-// it once, format, then come back to this sketch.
+// See esp32/format_flash/format_flash.ino: flash it once, format, then come
+// back to this sketch.
 static void flashSetup() {
-  // 1. Explicitly start the SPI pins
-  SPI.begin(18, 19, 23, -1);
-  
-  // 2. Safely create the hardware objects NOW, after boot-up is finished
-  flashTransport = new Adafruit_FlashTransport_SPI(FLASH_CS_GPIO, &SPI);
-  flash = new Adafruit_SPIFlash(flashTransport);
-
-  if (!flash->begin()) {
+  // On a generic ESP32 dev board (not one of Adafruit's own, which this
+  // library was primarily built for), the VSPI bus needs to be explicitly
+  // started before the flash transport touches it — otherwise
+  // Adafruit_SPIFlash ends up dereferencing an uninitialized internal SPI
+  // handle, which crashes with exactly a LoadProhibited/null-pointer panic.
+  SPI.begin();
+  if (!flash.begin()) {
     Serial.println("Error initializing W25Q64 SPI flash chip (check wiring/CS pin).");
     return;
   }
-  
-  // 3. Mount the filesystem (pass 'flash' instead of '&flash' since it is now a pointer)
-  if (!fatfs.begin(flash)) {
-    Serial.println("Error mounting FAT filesystem on flash...");
+
+  // flash.begin() auto-speeds the SPI clock up to this chip's rated
+  // maximum (133MHz for the W25Q64JV) -- far beyond what breadboard
+  // jumper wires can reliably carry. Confirmed on the bench: every bulk
+  // read/write after begin() silently returned garbage (all zeros) at
+  // that speed while still reporting success, traced by dumping the
+  // Adafruit_SPIFlash cache's actual buffer contents in format_flash.ino.
+  // Forcing it back down to a speed the wiring can sustain.
+  flashTransport.setClockSpeed(1000000, 1000000);
+
+  if (!fatfs.begin(&flash)) {
+    Serial.println("Error mounting FAT filesystem on flash — it may need formatting once "
+                    "(see esp32/format_flash/format_flash.ino).");
     return;
   }
-  
   flashReady = true;
   Serial.println("External SPI flash mounted.");
 }

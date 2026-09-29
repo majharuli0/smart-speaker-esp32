@@ -1,433 +1,440 @@
-// One-time utility: formats the W25Q64JV SPI flash chip as a FAT
-// filesystem so esp32.ino can mount and use it for sound storage.
-//
-// You only need to run this ONCE per physical flash chip (or again if you
-// swap in a different/blank one). It is *not* part of the normal
-// build/flash cycle for esp32.ino.
-//
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-// !!  NOTE: THIS ERASES ALL DATA ON THE FLASH CHIP!            !!
-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-//
-// Usage:
-// - Upload this sketch (board: ESP32 Dev Module, same port as esp32.ino).
-// - Open Serial Monitor at 115200 baud.
-// - Type OK (all caps) and press enter when prompted.
-// - Takes ~30-60 seconds. Prints a success message when done.
-// - Then re-open and re-upload esp32.ino as normal.
-//
-// IMPORTANT — a required library patch: Adafruit_SPIFlash has a known bug
-// on ESP32 (https://github.com/adafruit/Adafruit_SPIFlash/issues/120) where
-// Adafruit_SPIFlashBase::begin() unconditionally force-casts the transport
-// to Adafruit_FlashTransport_ESP32* (meant only for the ESP32's own
-// *internal* flash) even when you're using Adafruit_FlashTransport_SPI (an
-// external chip, our case) — crashing with a LoadProhibited panic. Fixed by
-// removing `defined(ARDUINO_ARCH_ESP32) ||` from the #if in the installed
-// library's src/Adafruit_SPIFlashBase.cpp, so ESP32 falls through to the
-// same generic JEDEC-ID auto-detect path other platforms use (it already
-// recognizes W25Q64JV_IQ). That fix lives in the library's install
-// location, not here — if you ever reinstall/update "Adafruit SPIFlash" via
-// Library Manager, this sketch (and esp32.ino) will crash again the same
-// way until the patch is reapplied.
-//
-// Adapted from Adafruit_SPIFlash's bundled "SdFat_format" example.
-
-#include "SdFat_Adafruit_Fork.h"
-#include <Adafruit_SPIFlash.h>
-#include <SPI.h>
-
-// Since SdFat doesn't fully support FAT12 such as format a new flash
-// We will use Elm Cham's fatfs f_mkfs() to format
-#include "ff.h"
-// diskio_impl.h (not diskio.h) -- this ESP32 core's bundled FatFs is
-// ESP-IDF's registration-based port: the classic global disk_read()/
-// disk_write()/etc. names are the *generic dispatcher* already compiled
-// into libfatfs.a for every ESP32 sketch, not free for us to redefine
-// (that's the "multiple definition of `ff_disk_read`" link error).
-// Instead we register our own read/write/etc. callbacks under a chosen
-// drive number via ff_diskio_register(), which the dispatcher then calls
-// through -- diskio_impl.h declares that API and pulls in diskio.h itself.
-#include "diskio_impl.h"
-
-// up to 11 characters
-#define DISK_LABEL "EXT FLASH"
-
-// Arbitrary FatFs drive number for our external SPI flash chip -- "0:" in
-// the f_mount/f_mkfs calls below refers to whichever pdrv is registered
-// here.
-#define EXT_FLASH_PDRV 0
-
-// Same SPI flash wiring as esp32.ino: CS on GPIO 5, hardware VSPI bus
-// (default VSPI pins SCK=18, MISO=19, MOSI=23 match the physical wiring).
-#define FLASH_CS_GPIO 5
-
-// 1 = loop forever printing the raw JEDEC ID for live wiring troubleshooting
-// (see setup()); 0 = normal one-time format behavior. Flip to 0 once
-// wiring is confirmed good, then re-upload to actually format the chip.
-#define WIRING_DIAGNOSTIC_MODE 1
-
-// 1 = loop forever writing/reading a test pattern to one sector (far from
-// any real filesystem data) and reporting match/mismatch -- exercises the
-// real bulk read/write path fast and repeatably, without needing a full
-// erase+format cycle each time. Only one of this and
-// WIRING_DIAGNOSTIC_MODE should be 1 at a time.
-#define READ_WRITE_TEST_MODE 1
-
-Adafruit_FlashTransport_SPI flashTransport(FLASH_CS_GPIO, &SPI);
-
-Adafruit_SPIFlash flash(&flashTransport);
-FatVolume fatfs;
-
-// Forward declarations for the diskio callbacks (defined near the bottom
-// of this file, after setup()/loop()). Arduino's IDE normally auto-generates
-// these, but its parser is unreliable with multi-line signatures like these
-// -- declaring them explicitly avoids depending on that.
-extern "C" {
-DSTATUS extFlashDiskInitialize(BYTE pdrv);
-DSTATUS extFlashDiskStatus(BYTE pdrv);
-DRESULT extFlashDiskRead(BYTE pdrv, BYTE *buff, DWORD sector, UINT count);
-DRESULT extFlashDiskWrite(BYTE pdrv, const BYTE *buff, DWORD sector, UINT count);
-DRESULT extFlashDiskIoctl(BYTE pdrv, BYTE cmd, void *buff);
-}
-
-// Bigger stack for the main Arduino task -- formatting an 8MB volume with
-// f_mkfs() uses more stack (ours + FatFs's own internal frames) than the
-// default budget allows, and overflowing it panics with "Stack canary
-// watchpoint triggered" rather than a clean error. This must be at file
-// scope (not inside a function).
-SET_LOOP_TASK_STACK_SIZE(16 * 1024);
-
-void format_fat12(void) {
-// Working buffer for f_mkfs. static: keeps this 4KB (plus the FATFS struct
-// below) off the stack entirely, rather than just relying on the bigger
-// stack above -- belt and suspenders, since f_mkfs()'s own internal stack
-// usage for an 8MB volume isn't something we control.
-#ifdef __AVR__
-  static uint8_t workbuf[512];
-#else
-  static uint8_t workbuf[4096];
+#include <WiFi.h>
+#include <WiFiManager.h>
+#include <ESPmDNS.h>
+#include <WebSocketsClient.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <Preferences.h>
+#include <nvs.h>
+#include <esp_timer.h>
+#include <esp_partition.h>
+#include <esp_ota_ops.h>
+#include "driver/i2s.h"
+#if CONFIG_IDF_TARGET_ESP32S3
+// Only on the S3 (3 MB app space): these add ~100 KB, which the original
+// ESP32's default 1.3 MB app space (already ~96% full) can't fit
+#include <FFat.h>
+#include <LittleFS.h>
+#define MEASURE_FILE_STORAGE 1
 #endif
 
-  // Elm Cham's fatfs objects
-  static FATFS elmchamFatfs;
+#define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
+#define SERVER_PORT 3000
 
-  // Full chip erase first: earlier format attempts on this chip got
-  // interrupted mid-operation by crashes (stack overflow, a stuck
-  // write-in-progress status bit), which can leave sectors partially
-  // written/erased in a way f_mkfs()'s optimizations don't expect even
-  // though f_mkfs() itself reports success. Erasing everything back to a
-  // known-good blank (all 0xFF) state removes that as a variable. Can take
-  // up to a couple minutes on an 8MB chip -- this call blocks until done.
-  Serial.println(F("Erasing entire chip first (can take up to ~2 minutes)..."));
-  if (!flash.eraseChip()) {
-    Serial.println(F("Error, chip erase failed!"));
-    while (1)
-      yield();
-  }
-  flash.waitUntilReady();
-  Serial.println(F("Erase complete."));
+// MAX98357A amp wiring, picked by which board you compile for
+#if CONFIG_IDF_TARGET_ESP32S3
+// ESP32-S3-WROOM-1 N16R8: GPIO 4/5/6 sit next to each other on the left header.
+// Avoid 35-37 (octal PSRAM), 19/20 (USB), 43/44 (serial), 0/3/45/46 (boot pins).
+#define I2S_DOUT_GPIO 4
+#define I2S_BCLK_GPIO 5
+#define I2S_LRC_GPIO  6
+#else
+// Original ESP32 (physically traced, don't re-derive from a diagram)
+#define I2S_DOUT_GPIO 33
+#define I2S_BCLK_GPIO 25
+#define I2S_LRC_GPIO  32
+#endif
+#define I2S_PORT I2S_NUM_0
 
-  // f_mkfs()'s signature changed in the FatFs version bundled with newer
-  // ESP32 cores: it now takes an MKFS_PARM struct instead of separate
-  // fmt/au_size arguments (Adafruit's original example predates this).
-  // Zero-value fields mean "auto-select", per FatFs's own convention.
-  //
-  // FM_SFD ("Super Floppy Disk") skips the MBR/partition-table layout
-  // entirely, putting the FAT boot sector directly at sector 0 -- the
-  // right choice for a single small flash chip like this (partition
-  // tables are a hard-disk convention). Without it, f_mkfs() built an MBR
-  // at sector 0 pointing to a partition starting at sector 63, and
-  // f_mount() couldn't validate that round-trip even though every
-  // individual read/write succeeded (confirmed via per-call diskio logs).
-  MKFS_PARM opt = {};
-  opt.fmt = FM_FAT | FM_SFD;
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 2  // original ESP32 dev board's blue LED (the S3 core defines its RGB LED)
+#endif
+#define SAMPLE_RATE 16000   // tones are converted to 16 kHz 16-bit mono WAV by the web page
+#define RING_MAX_MS 60000   // stop ringing after 1 minute if nobody presses Stop
 
-  // Make filesystem.
-  FRESULT r = f_mkfs("", &opt, workbuf, sizeof(workbuf));
-  if (r != FR_OK) {
-    Serial.print(F("Error, f_mkfs failed with error code: "));
-    Serial.println(r, DEC);
-    while (1)
-      yield();
-  }
+// Live voice from the browser (same 16 kHz mono format as tones)
+#define TALK_BUF_SAMPLES 4096  // 256 ms ring buffer; when full the oldest audio is dropped
+#define TALK_PREBUFFER   1600  // wait for 100 ms of audio before playing, to ride out Wi-Fi hiccups
+#define TALK_DRY_MS      150   // no audio for longer than the I2S queue holds → buffer up again
 
-  // Adafruit_SPIFlash caches writes in RAM per erase-block and only
-  // physically commits them on syncBlocks() -- without this, the mount
-  // right below can fail with FR_NO_FILESYSTEM because what f_mkfs() just
-  // wrote hasn't actually reached the chip yet.
-  flash.syncBlocks();
+#define STATS_INTERVAL_MS 2000  // how often RAM/storage/CPU stats go to the web page
 
-  // Diagnostic: inspect the actual bytes physically read back from sector
-  // 0, independent of f_mount()'s validation logic. A real FAT boot sector
-  // ends with signature 0x55 0xAA at offset 510-511; the very first bytes
-  // are normally a jump instruction (0xEB or 0xE9) followed by an OEM name.
-  {
-    static uint8_t sector0[512];
-    bool ok = flash.readBlocks(0, sector0, 1);
-    Serial.printf("Sector 0 read: %s\n", ok ? "OK" : "FAIL");
-    Serial.print(F("First 16 bytes: "));
-    for (int i = 0; i < 16; i++) Serial.printf("%02X ", sector0[i]);
-    Serial.println();
-    Serial.printf("Boot signature (should be 55 AA): %02X %02X\n", sector0[510], sector0[511]);
-  }
+WebSocketsClient webSocket;
+WiFiManager wm;
+String deviceId;
+IPAddress serverIp;
+Preferences prefs;
 
-  // mount to set disk label
-  r = f_mount(&elmchamFatfs, "0:", 1);
-  if (r != FR_OK) {
-    Serial.print(F("Error, f_mount failed with error code: "));
-    Serial.println(r, DEC);
-    while (1)
-      yield();
-  }
+int volume = 70;          // 0-100, saved in flash so it survives a restart
+int32_t volumeGain = 0;   // 0-256 multiplier applied to every sample
 
-  // Setting label
-  Serial.println(F("Setting disk label to: " DISK_LABEL));
-  r = f_setlabel(DISK_LABEL);
-  if (r != FR_OK) {
-    Serial.print(F("Error, f_setlabel failed with error code: "));
-    Serial.println(r, DEC);
-    while (1)
-      yield();
-  }
+HTTPClient http;
+WiFiClient *toneStream = nullptr;
+String ringingTone;           // empty = not ringing
+int32_t toneBytesLeft = 0;
+unsigned long ringStart = 0;
 
-  // unmount
-  f_unmount("0:");
+int16_t talkBuf[TALK_BUF_SAMPLES];
+size_t talkHead = 0, talkCount = 0;  // read position, samples buffered
+bool talking = false, talkPlaying = false, talkEnding = false;
+unsigned long talkLastPlayed = 0;
 
-  // sync to make sure all data is written to flash
-  flash.syncBlocks();
-
-  Serial.println(F("Formatted flash!"));
+void blink() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(300);
+  digitalWrite(LED_BUILTIN, LOW);
 }
 
-void check_fat12(void) {
-  // Check new filesystem
-  if (!fatfs.begin(&flash)) {
-    Serial.println(F("Error, failed to mount newly formatted filesystem!"));
-    while (1)
-      delay(1);
+// Squared curve: ears hear loudness logarithmically, so a linear slider
+// would do almost nothing in its top half.
+void setVolume(int v) {
+  volume = constrain(v, 0, 100);
+  volumeGain = volume * volume * 256 / 10000;
+}
+
+inline int16_t applyVolume(int16_t s) {
+  return (int32_t)s * volumeGain >> 8;
+}
+
+void sendVolume() {
+  String msg = "{\"type\":\"volume\",\"value\":" + String(volume) + "}";
+  webSocket.sendTXT(msg);
+}
+
+// CPU load per core = share of time its idle task did NOT run since the last
+// call (FreeRTOS run-time stats are enabled in the ESP32 Arduino core).
+void cpuLoad(int out[2]) {
+  static uint32_t lastIdle[2] = {0, 0};
+  static uint32_t lastTime = 0;
+  uint32_t now = (uint32_t)esp_timer_get_time();  // µs; unsigned math survives the wrap
+  uint32_t elapsed = now - lastTime;
+  for (int core = 0; core < 2; core++) {
+    uint32_t idle = ulTaskGetIdleRunTimeCounterForCore(core);
+    uint32_t idleDelta = idle - lastIdle[core];
+    out[core] = (lastTime && elapsed) ? constrain(100 - (int)(100ULL * idleDelta / elapsed), 0, 100) : 0;
+    lastIdle[core] = idle;
+  }
+  lastTime = now;
+}
+
+// Measured once in setup(): ESP.getSketchSize() re-checksums the whole
+// program in flash (~1 MB) on every call, which froze audio when it ran
+// every 2 s. The size can't change while running anyway.
+uint32_t appUsed = 0, appTotal = 0;
+
+void sendStats() {
+  nvs_stats_t nvs = {};
+  nvs_get_stats(NULL, &nvs);
+  int cpu[2];
+  cpuLoad(cpu);
+
+  JsonDocument doc;
+  doc["type"] = "stats";
+  doc["heapFree"] = ESP.getFreeHeap();
+  doc["heapTotal"] = ESP.getHeapSize();
+  doc["heapMin"] = ESP.getMinFreeHeap();       // lowest free RAM since boot
+  doc["heapMaxBlock"] = ESP.getMaxAllocHeap(); // largest single free block
+  doc["psramTotal"] = ESP.getPsramSize();      // 0 on boards without PSRAM
+  doc["psramFree"] = ESP.getFreePsram();
+  doc["appUsed"] = appUsed;
+  doc["appTotal"] = appTotal;
+  doc["nvsUsed"] = nvs.used_entries;           // settings storage (Wi-Fi, volume)
+  doc["nvsTotal"] = nvs.total_entries;
+  doc["flashSize"] = ESP.getFlashChipSize();
+  doc["cpuMhz"] = ESP.getCpuFreqMHz();
+  doc["cpu"][0] = cpu[0];                      // core 0: Wi-Fi
+  doc["cpu"][1] = cpu[1];                      // core 1: this sketch
+  doc["uptime"] = millis() / 1000;
+  doc["rssi"] = WiFi.RSSI();
+
+  String out;
+  serializeJson(doc, out);
+  webSocket.sendTXT(out);
+}
+
+// ---- Flash layout: every partition, its size, and how much is used ----
+// Built once in setup() (the layout can't change while running) and sent
+// whenever the server connects or a page asks.
+String partitionsJson;
+
+// Mount a file-storage partition read-only for a moment to see how full it is
+void fileStorageUsage(JsonObject o, const esp_partition_t *p) {
+#ifdef MEASURE_FILE_STORAGE
+  bool fat = p->subtype == ESP_PARTITION_SUBTYPE_DATA_FAT;
+  if (fat && FFat.begin(false, "/ffat", 1, p->label)) {
+    o["used"] = FFat.usedBytes();
+    o["fsTotal"] = FFat.totalBytes();
+    FFat.end();
+    o["note"] = "file storage (FAT)";
+    return;
+  }
+  if (!fat && LittleFS.begin(false, "/littlefs", 1, p->label)) {
+    o["used"] = LittleFS.usedBytes();
+    o["fsTotal"] = LittleFS.totalBytes();
+    LittleFS.end();
+    o["note"] = "file storage (LittleFS)";
+    return;
+  }
+  o["note"] = "file storage (empty, not formatted yet)";
+#else
+  o["note"] = "file storage (usage not measured on this board)";
+#endif
+}
+
+void buildPartitions() {
+  JsonDocument doc;
+  doc["type"] = "partitions";
+  doc["flashSize"] = ESP.getFlashChipSize();
+  JsonArray list = doc["list"].to<JsonArray>();
+  const esp_partition_t *running = esp_ota_get_running_partition();
+
+  // esp_partition_next() frees the iterator itself when it reaches the end
+  for (esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, NULL);
+       it; it = esp_partition_next(it)) {
+    const esp_partition_t *p = esp_partition_get(it);
+    JsonObject o = list.add<JsonObject>();
+    o["name"] = p->label;
+    o["offset"] = p->address;
+    o["size"] = p->size;
+
+    if (p->type == ESP_PARTITION_TYPE_APP) {
+      o["kind"] = "app";
+      if (p == running) { o["used"] = appUsed; o["note"] = "running program"; }
+      else o["note"] = "spare slot for over-the-air updates";
+      continue;
+    }
+    switch (p->subtype) {
+      case ESP_PARTITION_SUBTYPE_DATA_NVS: {
+        nvs_stats_t s = {};
+        nvs_get_stats(p->label, &s);
+        o["kind"] = "nvs";
+        if (s.total_entries) o["used"] = (uint64_t)p->size * s.used_entries / s.total_entries;
+        o["note"] = "settings (Wi-Fi, volume)";
+        break;
+      }
+      case ESP_PARTITION_SUBTYPE_DATA_FAT:
+      case ESP_PARTITION_SUBTYPE_DATA_SPIFFS:  // LittleFS uses this subtype too
+        o["kind"] = "files";
+        fileStorageUsage(o, p);
+        break;
+      case ESP_PARTITION_SUBTYPE_DATA_OTA:      o["kind"] = "system"; o["note"] = "which app slot to start"; break;
+      case ESP_PARTITION_SUBTYPE_DATA_COREDUMP: o["kind"] = "system"; o["note"] = "crash report storage"; break;
+      case ESP_PARTITION_SUBTYPE_DATA_PHY:      o["kind"] = "system"; o["note"] = "radio calibration"; break;
+      default:                                  o["kind"] = "other";
+    }
+  }
+  serializeJson(doc, partitionsJson);
+}
+
+void i2sSetup() {
+  i2s_config_t config = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
+    .sample_rate = SAMPLE_RATE,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 8,
+    .dma_buf_len = 256,
+    .use_apll = false,
+    .tx_desc_auto_clear = true
+  };
+  i2s_pin_config_t pins = {
+    .bck_io_num = I2S_BCLK_GPIO,
+    .ws_io_num = I2S_LRC_GPIO,
+    .data_out_num = I2S_DOUT_GPIO,
+    .data_in_num = I2S_PIN_NO_CHANGE
+  };
+  i2s_driver_install(I2S_PORT, &config, 0, NULL);
+  i2s_set_pin(I2S_PORT, &pins);
+  i2s_zero_dma_buffer(I2S_PORT);
+}
+
+// Starts (or restarts, for looping) the HTTP download of the ringing tone
+bool openTone() {
+  http.end();
+  toneBytesLeft = 0;
+  http.begin("http://" + serverIp.toString() + ":" + String(SERVER_PORT) + "/tones/" + ringingTone);
+  if (http.GET() != HTTP_CODE_OK) return false;
+  toneStream = http.getStreamPtr();
+  uint8_t header[44];  // standard WAV header, as written by the web page
+  if (toneStream->readBytes(header, sizeof(header)) != sizeof(header)) return false;
+  toneBytesLeft = http.getSize() - sizeof(header);
+  return toneBytesLeft > 0;
+}
+
+void stopTone() {
+  if (ringingTone.isEmpty()) return;
+  http.end();
+  ringingTone = "";
+  i2s_zero_dma_buffer(I2S_PORT);
+  Serial.println("Ringing stopped");
+  webSocket.sendTXT("{\"type\":\"stopped\"}");
+}
+
+void stopTalk() {
+  if (!talking) return;
+  talking = false;
+  talkCount = 0;
+  i2s_zero_dma_buffer(I2S_PORT);
+  Serial.println("Talk stopped");
+  webSocket.sendTXT("{\"type\":\"talk_stopped\"}");
+}
+
+void startTalk() {
+  stopTone();
+  stopTalk();
+  talking = true;
+  talkPlaying = talkEnding = false;
+  talkHead = talkCount = 0;
+  Serial.println("Talk started");
+  webSocket.sendTXT("{\"type\":\"talking\"}");
+}
+
+// Binary WebSocket chunk: little-endian 16-bit samples (read byte-wise, the payload may be unaligned)
+void talkPush(const uint8_t *data, size_t len) {
+  for (size_t i = 0; i + 1 < len; i += 2) {
+    if (talkCount == TALK_BUF_SAMPLES) {  // full (browser clock slightly fast): drop oldest
+      talkHead = (talkHead + 1) % TALK_BUF_SAMPLES;
+      talkCount--;
+    }
+    talkBuf[(talkHead + talkCount) % TALK_BUF_SAMPLES] = (int16_t)(data[i] | (data[i + 1] << 8));
+    talkCount++;
+  }
+}
+
+// Same idea as pumpTone(): one small chunk per loop() so the WebSocket keeps being serviced
+void pumpTalk() {
+  if (!talking) return;
+  if (!talkPlaying) {
+    if (talkCount < TALK_PREBUFFER && !talkEnding) return;
+    talkPlaying = true;
+  }
+  if (talkCount == 0) {
+    if (talkEnding) stopTalk();                                        // played out the last words
+    else if (millis() - talkLastPlayed > TALK_DRY_MS) talkPlaying = false;  // starved: buffer up again
+    return;
+  }
+
+  int16_t stereo[512];
+  size_t n = min(talkCount, (size_t)256);
+  for (size_t i = 0; i < n; i++) {
+    stereo[2 * i] = stereo[2 * i + 1] = applyVolume(talkBuf[talkHead]);
+    talkHead = (talkHead + 1) % TALK_BUF_SAMPLES;
+  }
+  talkCount -= n;
+  size_t written;
+  i2s_write(I2S_PORT, stereo, n * 4, &written, portMAX_DELAY);
+  talkLastPlayed = millis();
+}
+
+void startTone(const String &tone) {
+  stopTalk();  // an alarm wins over live talk
+  stopTone();
+  ringingTone = tone;
+  ringStart = millis();
+  Serial.println("Ringing: " + tone);
+  if (openTone()) webSocket.sendTXT("{\"type\":\"ringing\"}");
+  else stopTone();
+}
+
+// Plays one small chunk per call so webSocket.loop() keeps running and
+// "stop" works mid-ring. Loops the tone until stopped or RING_MAX_MS.
+void pumpTone() {
+  if (ringingTone.isEmpty()) return;
+  if (millis() - ringStart > RING_MAX_MS) return stopTone();
+  if (toneBytesLeft < 2) {  // end of file: play it again
+    if (!openTone()) stopTone();
+    return;
+  }
+
+  size_t avail = toneStream->available();
+  if (avail < 2) {
+    if (!http.connected()) stopTone();  // server went away mid-stream
+    return;
+  }
+
+  int16_t mono[256], stereo[512];
+  size_t want = min(min(avail, sizeof(mono)), (size_t)toneBytesLeft) & ~(size_t)1;
+  int samples = toneStream->read((uint8_t *)mono, want) / 2;
+  toneBytesLeft -= samples * 2;
+  for (int i = 0; i < samples; i++) stereo[2 * i] = stereo[2 * i + 1] = applyVolume(mono[i]);
+  size_t written;
+  i2s_write(I2S_PORT, stereo, samples * 4, &written, portMAX_DELAY);
+}
+
+void onWsEvent(WStype_t type, uint8_t *payload, size_t length) {
+  if (type == WStype_CONNECTED) {
+    Serial.println("Connected to server");
+    String hello = "{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\"}";
+    webSocket.sendTXT(hello);
+    sendVolume();
+    webSocket.sendTXT(partitionsJson);
+  } else if (type == WStype_BIN) {
+    if (talking) talkPush(payload, length);
+  } else if (type == WStype_TEXT) {
+    JsonDocument doc;
+    if (deserializeJson(doc, payload, length)) return;
+    String cmd = doc["type"] | "";
+    Serial.println("Command: " + cmd);
+
+    if (cmd == "blink") blink();
+    else if (cmd == "ring") startTone(doc["tone"] | "");
+    else if (cmd == "stop") { stopTone(); stopTalk(); }
+    else if (cmd == "talk_start") startTalk();
+    else if (cmd == "talk_stop") talkEnding = true;  // finish what's buffered, then stop
+    else if (cmd == "volume") {  // with "value": set it; without: just report it
+      if (doc["value"].is<int>()) {
+        setVolume(doc["value"].as<int>());
+        prefs.putUChar("vol", volume);
+      }
+      sendVolume();
+    }
+    else if (cmd == "partitions") webSocket.sendTXT(partitionsJson);
+    else if (cmd == "reset_wifi") { wm.resetSettings(); ESP.restart(); }
   }
 }
 
 void setup() {
-  // Initialize serial port and wait for it to open before continuing.
   Serial.begin(115200);
-  while (!Serial)
-    delay(100);
+  pinMode(LED_BUILTIN, OUTPUT);  // GPIO 2 on ESP32, the RGB LED (GPIO 48) on the S3
+  i2sSetup();
+  prefs.begin("audio");
+  setVolume(prefs.getUChar("vol", 70));
+  appUsed = ESP.getSketchSize();
+  appTotal = appUsed + ESP.getFreeSketchSpace();
+  buildPartitions();
 
-  Serial.println(F("Adafruit SPI Flash FatFs Format Example"));
+  // Factory MAC from eFuse, e.g. "esp32-246f28ae5278"
+  uint64_t mac = ESP.getEfuseMac();
+  char id[19];
+  snprintf(id, sizeof(id), "esp32-%02x%02x%02x%02x%02x%02x",
+           (uint8_t)mac, (uint8_t)(mac >> 8), (uint8_t)(mac >> 16),
+           (uint8_t)(mac >> 24), (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
+  deviceId = id;
+  Serial.println("Device ID: " + deviceId);
 
-  // Same SPI init esp32.ino does before touching the flash chip.
-  SPI.begin();
+  // No saved Wi-Fi (or it's unreachable)? Opens hotspot "LED-Setup-xxxx":
+  // join it from a phone, pick your network, enter the password.
+  String apName = "LED-Setup-" + deviceId.substring(deviceId.length() - 4);
+  if (!wm.autoConnect(apName.c_str())) ESP.restart();
+  Serial.println("Wi-Fi connected, IP: " + WiFi.localIP().toString());
 
-#if WIRING_DIAGNOSTIC_MODE
-  // Live wiring check: keeps reading and printing the raw JEDEC ID forever
-  // instead of just once, so you can physically wiggle/reseat each wire
-  // (VCC, GND, CLK, DI, DO, CS) one at a time WHILE WATCHING Serial Monitor
-  // for a change. All 0x00 or all 0xFF means nothing's really connected on
-  // that read. A real Winbond chip's ID starts with manufacturer byte
-  // 0xEF and should settle on the SAME 3 distinct-looking bytes every
-  // time once the connection is solid. Set WIRING_DIAGNOSTIC_MODE to 0
-  // below and re-upload once you've confirmed a stable, believable ID.
-  while (true) {
-    uint8_t jedec[4] = {0, 0, 0, 0};
-    flashTransport.begin();
-    flashTransport.readCommand(0x9F /* JEDEC READ ID, standard across SPI NOR flash */, jedec, 4);
-    Serial.printf("Raw JEDEC ID bytes: %02X %02X %02X %02X\n", jedec[0], jedec[1], jedec[2], jedec[3]);
-    delay(500);
+  WiFi.setSleep(false);  // power-save mode drops mDNS replies
+  MDNS.begin(deviceId.c_str());
+  while ((serverIp = MDNS.queryHost(SERVER_MDNS_NAME)) == IPAddress(0, 0, 0, 0)) {
+    Serial.println("Looking for " SERVER_MDNS_NAME ".local ...");
+    delay(1000);
   }
-#endif
+  Serial.println("Server found at " + serverIp.toString());
 
-  // Initialize flash library and check its chip ID.
-  if (!flash.begin()) {
-    Serial.println(F("Error, failed to initialize flash chip!"));
-    while (1)
-      yield();
-  }
-
-  // flash.begin() auto-speeds the SPI clock up to this chip's rated
-  // maximum (133MHz for the W25Q64JV) -- fine on a proper PCB, but far
-  // beyond what breadboard jumper wires can reliably carry. Every bulk
-  // read/write after begin() was silently returning garbage (all zeros)
-  // at that speed, even though it reported "OK" -- confirmed by tracing
-  // the cache's actual buffer contents. The earlier raw JEDEC ID reads
-  // worked fine only because those happened before begin() sped things up
-  // (still at the transport's conservative default, 4MHz). Forcing it
-  // back down to a speed breadboard wiring can sustain reliably.
-  flashTransport.setClockSpeed(1000000, 1000000);
-
-  Serial.print(F("Flash chip JEDEC ID: 0x"));
-  Serial.println(flash.getJEDECID(), HEX);
-  Serial.print(F("Flash size: "));
-  Serial.print(flash.size() / 1024);
-  Serial.println(F(" KB"));
-
-#if READ_WRITE_TEST_MODE
-  // Fast, repeatable read/write reliability test -- exercises the exact
-  // same bulk read/write path as real formatting (through the cache, at
-  // the real 1MHz operating speed), but on ONE sector far from any
-  // filesystem structures, so it's safe to run repeatedly without
-  // reformatting anything. Loops forever so you can wiggle wires and
-  // watch for consistency, same as the wiring diagnostic above.
-  {
-    const uint32_t TEST_SECTOR = 2000; // arbitrary, well clear of anything f_mkfs touches
-    uint32_t pass = 0, fail = 0;
-    while (true) {
-      uint8_t writeBuf[512];
-      uint8_t readBuf[512];
-      uint8_t pattern = (uint8_t)(millis() & 0xFF); // changes each iteration
-      for (int i = 0; i < 512; i++) writeBuf[i] = (uint8_t)(pattern + i);
-
-      flash.eraseSector(TEST_SECTOR * 512 / 4096);
-      // Read status IMMEDIATELY (before waitUntilReady would block/clear
-      // it) -- a real erase takes tens of ms, so WIP (bit 0) should still
-      // read as SET right now. If it's already 0, the erase command was
-      // never actually accepted by the chip (e.g. Write Enable didn't
-      // really take), and eraseCommand()'s "success" was meaningless --
-      // it only confirms the SPI bytes were sent, not that the chip acted
-      // on them.
-      uint8_t statusRightAfterErase = flash.readStatus();
-      Serial.printf("[rw-test] status right after eraseSector(): 0x%02X (WIP bit %s)\n",
-                    statusRightAfterErase, (statusRightAfterErase & 0x01) ? "SET - erase really in progress" : "CLEAR - erase was likely ignored");
-      flash.waitUntilReady();
-      bool wOk = flash.writeBlocks(TEST_SECTOR, writeBuf, 1);
-      flash.syncBlocks();
-      bool rOk = flash.readBlocks(TEST_SECTOR, readBuf, 1);
-      bool match = (memcmp(writeBuf, readBuf, 512) == 0);
-
-      if (match) pass++; else fail++;
-      Serial.printf("[rw-test] pattern=0x%02X write=%s read=%s match=%s  (pass=%lu fail=%lu)\n",
-                    pattern, wOk ? "OK" : "FAIL", rOk ? "OK" : "FAIL", match ? "YES" : "NO",
-                    (unsigned long)pass, (unsigned long)fail);
-      if (!match) {
-        Serial.print(F("  wrote: "));
-        for (int i = 0; i < 16; i++) Serial.printf("%02X ", writeBuf[i]);
-        Serial.println();
-        Serial.print(F("  read:  "));
-        for (int i = 0; i < 16; i++) Serial.printf("%02X ", readBuf[i]);
-        Serial.println();
-      }
-      delay(500);
-    }
-  }
-#endif
-
-  // Uncomment to flash LED while writing to flash
-  // flash.setIndicator(LED_BUILTIN, true);
-
-  // Wait for user to send OK to continue.
-  Serial.setTimeout(
-      30000); // Increase timeout to print message less frequently.
-  do {
-    Serial.println(F("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-                     "!!!!!!!!!!!!"));
-    Serial.println(F("This sketch will ERASE ALL DATA on the flash chip and "
-                     "format it with a new filesystem!"));
-    Serial.println(F("Type OK (all caps) and press enter to continue."));
-    Serial.println(F("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-                     "!!!!!!!!!!!!"));
-  } while (!Serial.find((char *)"OK"));
-
-  // Hook our flash chip's read/write/etc. into FatFs's dispatcher under
-  // drive number EXT_FLASH_PDRV -- required before f_mkfs()/f_mount() can
-  // talk to it (see the diskio_impl.h comment above).
-  ff_diskio_impl_t diskioImpl = {
-    .init = extFlashDiskInitialize,
-    .status = extFlashDiskStatus,
-    .read = extFlashDiskRead,
-    .write = extFlashDiskWrite,
-    .ioctl = extFlashDiskIoctl,
-  };
-  ff_diskio_register(EXT_FLASH_PDRV, &diskioImpl);
-
-  // Call fatfs begin and passed flash object to initialize file system
-  Serial.println(
-      F("Creating and formatting FAT filesystem (this takes ~60 seconds)..."));
-
-  format_fat12();
-
-  check_fat12();
-
-  // Done!
-  Serial.println(
-      F("Flash chip successfully formatted with new empty filesystem!"));
+  webSocket.begin(serverIp.toString(), SERVER_PORT, "/");
+  webSocket.onEvent(onWsEvent);
+  webSocket.setReconnectInterval(3000);
 }
 
 void loop() {
-  // Nothing to be done in the main loop.
-}
+  webSocket.loop();
+  pumpTone();
+  pumpTalk();
 
-//--------------------------------------------------------------------+
-// fatfs diskio -- registered with ff_diskio_register() in setup(), not
-// picked up by fixed name (see the diskio_impl.h comment near the top).
-// Named distinctly from disk_read/disk_write/etc. on purpose: those names
-// are the generic dispatcher already compiled into every ESP32 sketch via
-// libfatfs.a: redefining them causes a "multiple definition" link error.
-//--------------------------------------------------------------------+
-extern "C" {
-
-DSTATUS extFlashDiskInitialize(BYTE pdrv) {
-  Serial.printf("[diskio] init pdrv=%u\n", pdrv);
-  return 0;
-}
-
-DSTATUS extFlashDiskStatus(BYTE pdrv) {
-  Serial.printf("[diskio] status pdrv=%u\n", pdrv);
-  return 0;
-}
-
-DRESULT extFlashDiskRead(BYTE pdrv,  /* Physical drive nmuber to identify the drive */
-                         BYTE *buff, /* Data buffer to store read data */
-                         DWORD sector, /* Start sector in LBA */
-                         UINT count    /* Number of sectors to read */
-) {
-  (void)pdrv;
-  bool ok = flash.readBlocks(sector, buff, count);
-  Serial.printf("[diskio] read  sector=%lu count=%u -> %s\n", (unsigned long)sector, count, ok ? "OK" : "FAIL");
-  return ok ? RES_OK : RES_ERROR;
-}
-
-DRESULT extFlashDiskWrite(BYTE pdrv, /* Physical drive nmuber to identify the drive */
-                          const BYTE *buff, /* Data to be written */
-                          DWORD sector,     /* Start sector in LBA */
-                          UINT count        /* Number of sectors to write */
-) {
-  (void)pdrv;
-  if (sector == 0) {
-    Serial.print(F("[diskio] write sector=0, buff's first 16 bytes as given to us: "));
-    for (int i = 0; i < 16; i++) Serial.printf("%02X ", buff[i]);
-    Serial.println();
+  static unsigned long lastStats = 0;
+  if (webSocket.isConnected() && millis() - lastStats >= STATS_INTERVAL_MS) {
+    lastStats = millis();
+    sendStats();
   }
-  bool ok = flash.writeBlocks(sector, buff, count);
-  Serial.printf("[diskio] write sector=%lu count=%u -> %s\n", (unsigned long)sector, count, ok ? "OK" : "FAIL");
-  return ok ? RES_OK : RES_ERROR;
-}
 
-DRESULT extFlashDiskIoctl(BYTE pdrv, /* Physical drive nmuber (0..) */
-                          BYTE cmd,  /* Control code */
-                          void *buff /* Buffer to send/receive control data */
-) {
-  (void)pdrv;
-  Serial.printf("[diskio] ioctl cmd=%u\n", cmd);
-
-  switch (cmd) {
-  case CTRL_SYNC:
-    flash.syncBlocks();
-    return RES_OK;
-
-  case GET_SECTOR_COUNT:
-    *((DWORD *)buff) = flash.size() / 512;
-    return RES_OK;
-
-  case GET_SECTOR_SIZE:
-    *((WORD *)buff) = 512;
-    return RES_OK;
-
-  case GET_BLOCK_SIZE:
-    *((DWORD *)buff) = 8; // erase block size in units of sector size
-    return RES_OK;
-
-  default:
-    return RES_PARERR;
-  }
-}
+  // Let core 1's idle task run, so CPU load reads true (and the chip runs cooler).
+  // Safe for audio: each pass moves 16 ms of sound and the I2S queue holds 128 ms.
+  delay(1);
 }

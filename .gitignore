@@ -5,3 +5,7 @@ node_modules
 backend/claims.json
 backend/sounds.json
 backend/sounds/
+
+# Alarm data and uploaded tones
+backend/alarms.json
+backend/tones/

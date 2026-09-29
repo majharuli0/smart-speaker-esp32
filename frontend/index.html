@@ -2,261 +2,331 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LED Demo</title>
 <style>
-  :root {
-    color-scheme: light;
-    --bg: #f6f7f9;
-    --card: #ffffff;
-    --border: #dfe3e8;
-    --text: #1f2430;
-    --muted: #6b7280;
-    --accent: #2563eb;
-    --accent-hover: #1d4ed8;
-    --danger: #dc2626;
-    --ok-bg: #dcfce7; --ok-fg: #166534;
-    --pending-bg: #fef9c3; --pending-fg: #854d0e;
-    --failed-bg: #fee2e2; --failed-fg: #991b1b;
-    --missing-bg: #ffedd5; --missing-fg: #9a3412;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    padding: 2rem 1rem 4rem;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-  }
-  .wrap { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.25rem; }
-  h1 { font-size: 1.4rem; margin: 0; }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1rem 1.25rem;
-  }
-  .card h2 { font-size: 0.95rem; margin: 0 0 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-  label { font-size: 0.9rem; }
-  input[type="text"], input[type="file"], select {
-    font: inherit;
-    padding: 0.4rem 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: #fff;
-    color: var(--text);
-  }
-  button {
-    font: inherit;
-    padding: 0.4rem 0.9rem;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: #fff;
-    cursor: pointer;
-  }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.primary:hover { background: var(--accent-hover); }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  button.danger { color: var(--danger); border-color: var(--danger); background: #fff; }
-  .row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-  .status-line { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; min-height: 1.1em; }
-  #status.connected { color: var(--ok-fg); }
-  #status.disconnected { color: var(--failed-fg); }
-  ul#soundsList { list-style: none; margin: 0.75rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-  .sound-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; }
-  .sound-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.92rem; }
-  .badge { font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 999px; white-space: nowrap; }
-  .status-ready { background: var(--ok-bg); color: var(--ok-fg); }
-  .status-pending { background: var(--pending-bg); color: var(--pending-fg); }
-  .status-failed { background: var(--failed-bg); color: var(--failed-fg); }
-  .status-missing { background: var(--missing-bg); color: var(--missing-fg); }
-  .empty { color: var(--muted); font-size: 0.9rem; padding: 0.5rem 0; }
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  ul { list-style: none; padding: 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .device { border: 1px solid #ddd; border-radius: 8px; padding: 0.8rem; margin-bottom: 1rem; }
+  .device b { font-family: monospace; font-size: 1.05rem; }
+  .st { flex: 1; color: #b45309; }
+  [data-volume] { flex: 1; max-width: 240px; }
+  .vol { min-width: 3em; color: #555; }
+  .alarms li { display: flex; gap: 0.5rem; align-items: center; padding: 0.3rem 0; border-bottom: 1px solid #eee; }
+  .alarms li span { flex: 1; }
+  .add label { font-size: 0.85rem; }
+  .muted, #status { color: #888; }
+  #notice { color: #b91c1c; }
+  .stats { display: grid; gap: 0.25rem; margin: 0.6rem 0; font-size: 0.82rem; }
+  .stat { display: grid; grid-template-columns: 5.5em minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; }
+  .bar { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: #16a34a; transition: width 0.4s; }
+  .bar.amber i { background: #d97706; }
+  .bar.red i { background: #dc2626; }
+  .flashbar { display: flex; height: 22px; border-radius: 6px; overflow: hidden; margin: 0.3rem 0 0.4rem; }
+  .flashbar i { display: block; min-width: 3px; } /* tiny parts (8 KB of 16 MB) stay visible */
+  .swatch { display: inline-block; width: 0.8em; height: 0.8em; border-radius: 3px; margin-right: 0.4em; vertical-align: -0.05em; }
+  .parts { border-collapse: collapse; width: 100%; max-width: 360px; }
+  .parts th, .parts td { text-align: left; padding: 0.15rem 0.5rem 0.15rem 0; border-bottom: 1px solid #eee; }
+  .parts th { color: #888; font-weight: normal; }
+  .parts td:not(:first-child), .parts th:not(:first-child) { text-align: right; }
+  [data-talk] { touch-action: none; user-select: none; }
+  [data-talk]:active { background: #fde68a; }
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>ESP32 LED Demo</h1>
+  <h1>Devices</h1>
+  <p id="status">connecting…</p>
+  <p id="notice"></p>
+  <ul id="devices"></ul>
 
-    <div class="card">
-      <h2>Pairing</h2>
-      <div class="row">
-        <label for="pairInput">Pair a device (paste the ID shown on its setup portal):</label>
-      </div>
-      <div class="row" style="margin-top:0.4rem">
-        <input id="pairInput" type="text" placeholder="esp32-AABBCCDDEEFF">
-        <button id="pair">Pair</button>
-        <span id="pairStatus" class="status-line" style="min-height:auto"></span>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Device</h2>
-      <div class="row">
-        <select id="device"><option value="">(none paired)</option></select>
-        <button id="flash">Flash LED</button>
-        <button id="playsound">Play Sound</button>
-        <button id="resetwifi">Reconfigure Wi-Fi</button>
-      </div>
-      <p id="status" class="status-line">connecting…</p>
-    </div>
-
-    <div class="card">
-      <h2>Sounds</h2>
-      <div class="row">
-        <input id="soundFile" type="file" accept="audio/wav,.wav">
-        <button id="uploadSound" class="primary">Upload</button>
-      </div>
-      <p id="uploadStatus" class="status-line"></p>
-      <ul id="soundsList"><li class="empty">Select a device to see its sounds</li></ul>
-    </div>
+  <h2>Tones</h2>
+  <div class="row">
+    <input id="file" type="file" accept="audio/*">
+    <button id="upload">Upload</button>
+    <span id="upmsg" class="muted"></span>
   </div>
+  <ul id="tones"></ul>
 
-  <script>
-    const status = document.getElementById('status');
-    const deviceSelect = document.getElementById('device');
-    const pairStatus = document.getElementById('pairStatus');
-    const soundFileInput = document.getElementById('soundFile');
-    const uploadBtn = document.getElementById('uploadSound');
-    const uploadStatus = document.getElementById('uploadStatus');
-    const soundsList = document.getElementById('soundsList');
+<script>
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const MAX_TONE_SECONDS = 30;
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {} };
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const uidOf = (id) => id.replace('esp32-', '').toUpperCase(); // display only; commands use id
 
-    // deviceId -> last known sounds array, so switching the dropdown
-    // re-renders instantly instead of waiting on a round-trip.
-    const soundsByDevice = {};
+  // Served by server.js → same host; opened as a file or via Live Server → local server
+  const serverHost = location.port === '3000' ? location.host : 'localhost:3000';
+  const ws = new WebSocket(`ws://${serverHost}`);
+  const send = (msg) => ws.send(JSON.stringify(msg));
 
-    let clientId = localStorage.getItem('clientId');
-    if (!clientId) {
-      clientId = crypto.randomUUID();
-      localStorage.setItem('clientId', clientId);
-    }
+  ws.onopen = () => {
+    $('status').textContent = `connected · times are in ${tz}`;
+    send({ type: 'hello', role: 'browser' });
+  };
+  ws.onclose = () => { $('status').textContent = 'disconnected (reload the page)'; };
 
-    const ws = new WebSocket(`ws://${location.host}`);
-
-    ws.onopen = () => {
-      status.textContent = 'connected';
-      status.className = 'status-line connected';
-      ws.send(JSON.stringify({ type: 'hello', role: 'browser', clientId }));
-    };
-    ws.onclose = () => {
-      status.textContent = 'disconnected';
-      status.className = 'status-line disconnected';
-    };
-
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, (c) => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-      }[c]));
-    }
-
-    function renderSounds(sounds) {
-      soundsList.innerHTML = '';
-      if (!sounds || sounds.length === 0) {
-        soundsList.innerHTML = '<li class="empty">No sounds uploaded yet</li>';
-        return;
-      }
-      sounds.forEach((s) => {
-        const li = document.createElement('li');
-        li.className = 'sound-row';
-        const reasonText = s.reason ? `: ${s.reason}` : '';
-        li.innerHTML = `
-          <span class="sound-name" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span>
-          <span class="badge status-${escapeHtml(s.status)}">${escapeHtml(s.status)}${escapeHtml(reasonText)}</span>
-          <button class="play-btn" ${s.status === 'ready' ? '' : 'disabled'}>Play</button>
-          <button class="delete-btn danger">Delete</button>
-        `;
-        li.querySelector('.play-btn').onclick = () => sendCommand('play_sound', { id: s.id });
-        li.querySelector('.delete-btn').onclick = () => {
-          if (confirm(`Delete "${s.name}"?`)) sendCommand('delete_sound', { id: s.id });
-        };
-        soundsList.appendChild(li);
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (['devices', 'alarms', 'tones'].includes(msg.type)) {
+      state[msg.type] = msg[msg.type];
+      render();
+      // Each device reports its own volume (it's stored on the device)
+      // (and its flash layout, measured once when it boots)
+      if (msg.type === 'devices') msg.devices.forEach((id) => {
+        send({ type: 'volume', target: id });
+        if (!state.partitions[id]) send({ type: 'partitions', target: id });
       });
+    } else if (msg.type === 'partitions') {
+      state.partitions[msg.deviceId] = msg;
+      const el = document.getElementById(`parts-${msg.deviceId}`);
+      if (el) el.innerHTML = partsHtml(msg);
+    } else if (msg.type === 'volume') {
+      state.volume[msg.deviceId] = msg.value;
+      const slider = document.querySelector(`[data-id="${CSS.escape(msg.deviceId)}"] [data-volume]`);
+      if (slider) { slider.value = msg.value; slider.nextElementSibling.textContent = `${msg.value}%`; }
+    } else if (msg.type === 'stats') {
+      // Every 2 s: redraw only this block, so the alarm form isn't wiped while typing
+      state.stats[msg.deviceId] = msg;
+      const el = document.getElementById(`stats-${msg.deviceId}`);
+      if (el) el.innerHTML = statsHtml(msg);
+    } else if (msg.type === 'ringing' || msg.type === 'stopped') {
+      setStatus(msg.deviceId, msg.type === 'ringing' ? '🔔 ringing' : '');
+    } else if (msg.type === 'talking' || msg.type === 'talk_stopped') {
+      setStatus(msg.deviceId, msg.type === 'talking' ? '🎙 talking' : '');
+    } else if (msg.type === 'talk_denied') {
+      stopTalk();
+      alert(msg.reason === 'busy' ? 'Someone else is already talking to this device.' : 'Device is offline.');
+    } else if (msg.type === 'alarm_fired' && !msg.delivered) {
+      $('notice').textContent = `Missed ${msg.time} alarm: ${uidOf(msg.deviceId)} was offline.`;
     }
+  };
 
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
+  function setStatus(id, text) {
+    state.status[id] = text;
+    const el = document.getElementById(`st-${id}`);
+    if (el) el.textContent = text;
+  }
 
-      if (msg.type === 'devices') {
-        const previous = deviceSelect.value;
-        deviceSelect.innerHTML = '';
-        if (msg.devices.length === 0) {
-          deviceSelect.innerHTML = '<option value="">(none paired)</option>';
-        }
-        msg.devices.forEach((id) => {
-          const opt = document.createElement('option');
-          opt.value = id;
-          opt.textContent = id;
-          deviceSelect.appendChild(opt);
-        });
-        if (msg.devices.includes(previous)) {
-          deviceSelect.value = previous;
-        } else {
-          deviceSelect.dispatchEvent(new Event('change'));
-        }
-      }
+  // ---- Device health (RAM / storage / CPU), pushed by each device every 2 s ----
+  const size = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
+  const uptime = (s) => {
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m ${s % 60}s`;
+  };
+  const signal = (dbm) => (dbm >= -60 ? 'good' : dbm >= -70 ? 'ok' : 'weak');
 
-      if (msg.type === 'claim_result') {
-        pairStatus.textContent = msg.ok ? `Paired ${msg.deviceId}` : `Failed: ${msg.message}`;
-      }
+  function bar(label, used, total, detail) {
+    const pct = total ? Math.round((used / total) * 100) : 0;
+    const level = pct > 90 ? 'red' : pct > 75 ? 'amber' : '';
+    return `<div class="stat"><span>${label}</span><div class="bar ${level}"><i style="width:${pct}%"></i></div>
+      <span class="muted">${pct}% · ${detail}</span></div>`;
+  }
 
-      if (msg.type === 'sounds') {
-        soundsByDevice[msg.deviceId] = msg.sounds;
-        if (msg.deviceId === deviceSelect.value) renderSounds(msg.sounds);
-      }
+  function statsHtml(s) {
+    if (!s) return '<span class="muted">waiting for stats…</span>';
+    const n = (v) => Number(v) || 0; // device data: numbers only into the HTML
+    return [
+      bar('RAM', n(s.heapTotal) - n(s.heapFree), n(s.heapTotal), `${size(n(s.heapFree))} free, lowest ${size(n(s.heapMin))}`),
+      n(s.psramTotal) ? bar('PSRAM', n(s.psramTotal) - n(s.psramFree), n(s.psramTotal), `${size(n(s.psramFree))} free`) : '',
+      bar('Settings', n(s.nvsUsed), n(s.nvsTotal), `${n(s.nvsUsed)} of ${n(s.nvsTotal)} entries`),
+      bar('CPU 0', n(s.cpu?.[0]), 100, 'Wi-Fi'),
+      bar('CPU 1', n(s.cpu?.[1]), 100, `our code · ${n(s.cpuMhz)} MHz`),
+      `<div class="muted">Up ${uptime(n(s.uptime))} · Wi-Fi ${n(s.rssi)} dBm (${signal(n(s.rssi))}) · ${size(n(s.flashSize))} flash chip</div>`,
+    ].join('');
+  }
 
-      if (msg.type === 'play_failed') {
-        uploadStatus.textContent = `Playback failed (${msg.id}): ${msg.reason}`;
-      }
-    };
+  // Flash chip: how much of it is used, part by part.
+  // "Used" is the data really stored. The bootloader and the small system
+  // parts count as fully used; the spare update slot and empty storage count as 0.
+  const PART_COLORS = ['#1f2937', '#7c3aed', '#f59e0b', '#2563eb', '#10b981', '#0891b2', '#ef4444', '#ec4899'];
 
-    function sendCommand(type, extra = {}) {
-      const target = deviceSelect.value;
-      if (!target) { alert('No device selected'); return; }
-      ws.send(JSON.stringify({ type, target, ...extra }));
+  function partsHtml(p) {
+    if (!p) return '';
+    const n = (v) => Number(v) || 0;
+    const flash = n(p.flashSize);
+    const list = [...(p.list || [])].sort((a, b) => n(a.offset) - n(b.offset));
+    if (!flash || !list.length) return '';
+    const boot = n(list[0].offset); // everything before the first part: bootloader + partition table
+    const rows = [...(boot ? [{ name: 'bootloader', kind: 'boot', size: boot, used: boot }] : []), ...list]
+      .map((x) => ({
+        name: x.name,
+        size: n(x.size),
+        used: x.used != null ? n(x.used) : ['boot', 'system'].includes(x.kind) && x.name !== 'coredump' ? n(x.size) : 0,
+      }));
+    const used = rows.reduce((sum, x) => sum + x.used, 0);
+    const color = (i) => PART_COLORS[i % PART_COLORS.length];
+
+    // One segment per part, as wide as its used share of the whole chip; grey = free
+    const segments = rows.map((x, i) => x.used
+      ? `<i title="${esc(x.name)}: ${size(x.used)}" style="flex-grow:${x.used};background:${color(i)}"></i>` : '').join('');
+
+    return `<div><b>Flash ${size(flash)}</b> · ${size(used)} used · ${size(flash - used)} free</div>
+      <div class="flashbar">${segments}<i title="free: ${size(flash - used)}" style="flex-grow:${flash - used};background:#e5e7eb"></i></div>
+      <table class="parts">
+        <tr><th>Part</th><th>Size</th><th>Used</th></tr>
+        ${rows.map((x, i) => `<tr><td><span class="swatch" style="background:${x.used ? color(i) : '#e5e7eb'}"></span>${esc(x.name)}</td>
+          <td>${size(x.size)}</td><td>${x.used ? size(x.used) : '0'}</td></tr>`).join('')}
+      </table>`;
+  }
+
+  function render() {
+    $('tones').innerHTML = state.tones
+      .map((t) => `<li><a href="http://${serverHost}/tones/${esc(t)}" target="_blank">${esc(t)}</a></li>`)
+      .join('') || '<li class="muted">No tones yet, upload one below.</li>';
+
+    const toneOptions = state.tones.map((t) => `<option>${esc(t)}</option>`).join('');
+    const dayBoxes = DAYS.map((d, i) =>
+      `<label><input type="checkbox" value="${i}" ${i > 0 && i < 6 ? 'checked' : ''}>${d}</label>`).join('');
+
+    $('devices').innerHTML = state.devices.map((id) => {
+      const alarms = state.alarms.filter((a) => a.deviceId === id).sort((a, b) => a.time.localeCompare(b.time));
+      return `
+        <li class="device" data-id="${esc(id)}">
+          <div class="row">
+            <b>${esc(uidOf(id))}</b><span class="st" id="st-${esc(id)}">${esc(state.status[id] || '')}</span>
+            <button data-cmd="blink">Blink</button>
+            <button data-cmd="test">Test tone</button>
+            <button data-cmd="stop">Stop</button>
+            <button data-talk>Hold to talk</button>
+            <button data-cmd="reset">Reset Wi-Fi</button>
+          </div>
+          <div class="row">
+            🔊 <input type="range" min="0" max="100" data-volume value="${state.volume[id] ?? 70}">
+            <span class="vol">${state.volume[id] ?? '…'}%</span>
+          </div>
+          <div class="stats" id="stats-${esc(id)}">${statsHtml(state.stats[id])}</div>
+          <div class="stats" id="parts-${esc(id)}">${partsHtml(state.partitions[id])}</div>
+          <ul class="alarms">${alarms.map((a) => `
+            <li data-alarm="${esc(a.id)}">
+              <input type="checkbox" data-cmd="toggle" title="Enabled" ${a.enabled ? 'checked' : ''}>
+              <span><b>${esc(a.time)}</b> ${a.days.map((d) => DAYS[d]).join(' ')} · ${esc(a.tone)}</span>
+              <button data-cmd="delete">Delete</button>
+            </li>`).join('')}
+          </ul>
+          <div class="row add">
+            <input type="time"> ${dayBoxes}
+            <select>${toneOptions}</select>
+            <button data-cmd="add">Add alarm</button>
+          </div>
+        </li>`;
+    }).join('') || '<li class="muted">No devices online</li>';
+  }
+
+  $('devices').addEventListener('click', (e) => {
+    const cmd = e.target.dataset.cmd;
+    if (!cmd) return;
+    const card = e.target.closest('[data-id]');
+    const id = card.dataset.id;
+    const add = card.querySelector('.add');
+    const tone = add.querySelector('select').value;
+    const alarm = state.alarms.find((a) => a.id === e.target.closest('[data-alarm]')?.dataset.alarm);
+
+    if (cmd === 'blink') send({ type: 'blink', target: id });
+    if (cmd === 'test') tone ? send({ type: 'ring', target: id, tone }) : alert('Upload a tone first');
+    if (cmd === 'stop') send({ type: 'stop', target: id });
+    if (cmd === 'reset' && confirm(`${uidOf(id)} will forget its Wi-Fi and reopen its setup hotspot. Continue?`)) {
+      send({ type: 'reset_wifi', target: id });
     }
+    if (cmd === 'toggle') send({ type: 'alarm_save', alarm: { ...alarm, enabled: e.target.checked } });
+    if (cmd === 'delete') send({ type: 'alarm_delete', id: alarm.id });
+    if (cmd === 'add') {
+      const time = add.querySelector('[type=time]').value;
+      const days = [...add.querySelectorAll('[type=checkbox]:checked')].map((c) => Number(c.value));
+      if (!time || !days.length || !tone) return alert('Pick a time, at least one day, and a tone.');
+      send({ type: 'alarm_save', alarm: { deviceId: id, time, days, tone, tz } });
+    }
+  });
 
-    document.getElementById('flash').onclick = () => sendCommand('flash');
-    document.getElementById('playsound').onclick = () => sendCommand('play_sound');
-    document.getElementById('resetwifi').onclick = () => {
-      if (confirm('Device will forget its Wi-Fi and reopen the LED-Demo-Setup portal. Continue?')) {
-        sendCommand('reset_wifi');
-      }
-    };
-    document.getElementById('pair').onclick = () => {
-      const deviceId = document.getElementById('pairInput').value.trim();
-      if (!deviceId) return;
-      ws.send(JSON.stringify({ type: 'claim_device', deviceId, clientId }));
-    };
+  // Volume: label follows while dragging; sent to the device on release
+  // (the device saves it to flash, so don't write on every pixel of movement)
+  $('devices').addEventListener('input', (e) => {
+    if (e.target.matches('[data-volume]')) e.target.nextElementSibling.textContent = `${e.target.value}%`;
+  });
+  $('devices').addEventListener('change', (e) => {
+    if (!e.target.matches('[data-volume]')) return;
+    send({ type: 'volume', target: e.target.closest('[data-id]').dataset.id, value: Number(e.target.value) });
+  });
 
-    deviceSelect.addEventListener('change', () => {
-      const target = deviceSelect.value;
-      if (!target) { renderSounds([]); return; }
-      renderSounds(soundsByDevice[target] || []);
-      ws.send(JSON.stringify({ type: 'list_sounds', target }));
-    });
+  // ---- Hold to talk: mic → 16 kHz 16-bit mono → 20 ms binary chunks → device ----
+  let talk = null; // { id, stream, ctx, released }
 
-    uploadBtn.onclick = async () => {
-      const target = deviceSelect.value;
-      const file = soundFileInput.files[0];
-      if (!target) { alert('No device selected'); return; }
-      if (!file) { alert('Choose a .wav file first'); return; }
+  async function startTalk(id) {
+    if (talk) return;
+    if (!navigator.mediaDevices) return alert('The microphone only works on https:// or http://localhost:3000');
+    talk = { id };
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const ctx = new AudioContext({ sampleRate: 16000 }); // browser resamples the mic for us
+      // Loaded from the server (not a blob) so it also works when this page is opened as a file
+      await ctx.audioWorklet.addModule(`http://${serverHost}/mic-worklet.js`);
+      const mic = new AudioWorkletNode(ctx, 'mic');
+      mic.port.onmessage = (e) => ws.send(e.data);
+      Object.assign(talk, { stream, ctx });
+      send({ type: 'talk_start', target: id }); // before any audio chunk
+      ctx.createMediaStreamSource(stream).connect(mic);
+      mic.connect(ctx.destination); // outputs silence; keeps the node running
+      await ctx.resume();
+      if (talk.released) stopTalk(); // button let go while the mic was starting
+    } catch (err) {
+      talk = null;
+      alert(`Microphone error: ${err.message}`);
+    }
+  }
 
-      uploadBtn.disabled = true;
-      uploadStatus.textContent = 'Uploading…';
-      try {
-        const res = await fetch(`/upload/${encodeURIComponent(target)}?clientId=${encodeURIComponent(clientId)}`, {
-          method: 'POST',
-          headers: { 'X-Filename': file.name },
-          body: file,
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || `Upload failed (${res.status})`);
-        uploadStatus.textContent = 'Uploaded — syncing to device…';
-        soundFileInput.value = '';
-      } catch (e) {
-        uploadStatus.textContent = `Error: ${e.message}`;
-      } finally {
-        uploadBtn.disabled = false;
-      }
-    };
-  </script>
+  function stopTalk() {
+    if (!talk) return;
+    if (!talk.ctx) { talk.released = true; return; } // still starting; startTalk will finish the stop
+    talk.stream.getTracks().forEach((t) => t.stop());
+    talk.ctx.close();
+    send({ type: 'talk_stop', target: talk.id });
+    talk = null;
+  }
+
+  $('devices').addEventListener('pointerdown', (e) => {
+    if (e.target.matches('[data-talk]')) startTalk(e.target.closest('[data-id]').dataset.id);
+  });
+  ['pointerup', 'pointercancel', 'blur'].forEach((ev) => window.addEventListener(ev, stopTalk));
+  $('devices').addEventListener('contextmenu', (e) => e.target.matches('[data-talk]') && e.preventDefault());
+
+  // Any audio file the browser can play → 16 kHz 16-bit mono WAV, the only
+  // format the ESP32 plays (no decoder needed on the device).
+  async function toDeviceWav(file) {
+    const audio = await new OfflineAudioContext(1, 1, 16000).decodeAudioData(await file.arrayBuffer());
+    const n = Math.min(audio.length, 16000 * MAX_TONE_SECONDS);
+    const channels = [...Array(audio.numberOfChannels)].map((_, c) => audio.getChannelData(c));
+    const v = new DataView(new ArrayBuffer(44 + n * 2));
+    const str = (o, s) => [...s].forEach((ch, i) => v.setUint8(o + i, ch.charCodeAt(0)));
+    str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVE');
+    str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    str(36, 'data'); v.setUint32(40, n * 2, true);
+    for (let i = 0; i < n; i++) {
+      const s = channels.reduce((sum, ch) => sum + ch[i], 0) / channels.length;
+      v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, s)) * 32767, true);
+    }
+    return v.buffer;
+  }
+
+  $('upload').onclick = async () => {
+    const file = $('file').files[0];
+    if (!file) return alert('Choose an audio file first.');
+    $('upmsg').textContent = 'Converting…';
+    try {
+      const name = file.name.replace(/\.[^.]*$/, '').replace(/[^\w.-]/g, '_') + '.wav';
+      const res = await fetch(`http://${serverHost}/tones`, {
+        method: 'POST', headers: { 'X-Filename': name }, body: await toDeviceWav(file),
+      });
+      if (!res.ok) throw new Error(`upload failed (${res.status})`);
+      $('upmsg').textContent = `Uploaded ${name}`;
+      $('file').value = '';
+    } catch (err) {
+      $('upmsg').textContent = `Error: ${err.message}`;
+    }
+  };
+</script>
 </body>
 </html>

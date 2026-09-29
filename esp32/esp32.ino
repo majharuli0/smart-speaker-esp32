@@ -4,67 +4,227 @@
 #include <WebSocketsClient.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <SPI.h>
-#include <SdFat.h>
-#include <Adafruit_SPIFlash.h>
+#include <Preferences.h>
+#include <nvs.h>
+#include <esp_timer.h>
+#include <esp_partition.h>
+#include <esp_ota_ops.h>
 #include "driver/i2s.h"
-#include <math.h>
-
-// esp_read_mac()/ESP_MAC_WIFI_STA moved from esp_system.h to esp_mac.h in
-// newer ESP32 cores; guarded so this compiles against either.
-#if __has_include("esp_mac.h")
-#include "esp_mac.h"
-#else
-#include "esp_system.h"
+#if CONFIG_IDF_TARGET_ESP32S3
+// Only on the S3 (3 MB app space): these add ~100 KB, which the original
+// ESP32's default 1.3 MB app space (already ~96% full) can't fit
+#include <FFat.h>
+#include <LittleFS.h>
+#define MEASURE_FILE_STORAGE 1
 #endif
 
-#define LED_GPIO 2
-#define SERVER_MDNS_NAME "led-server"  // resolves led-server.local, advertised by server.js
-#define WS_PORT 3000
-#define RESET_BUTTON_GPIO 0        // BOOT button
-#define RESET_HOLD_MS 10000        // hold 10s to force a Wi-Fi reset
+#define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
+#define SERVER_PORT 3000
 
-// MAX98357A I2S amp wiring (current build — see docs/audio-alarm-design.md
-// for where this is headed). GAIN and SD are left floating on the amp
-// board: default gain, amp not shut down.
-// Confirmed by physically tracing each wire (two earlier guesses from
-// photos were both wrong) — don't re-derive this from a diagram again.
-#define I2S_DOUT_GPIO 33   // amp DIN  (audio data)
-#define I2S_BCLK_GPIO 25   // amp BCLK (bit clock)
-#define I2S_LRC_GPIO  32   // amp LRC  (word/L-R select)
+// MAX98357A amp wiring, picked by which board you compile for
+#if CONFIG_IDF_TARGET_ESP32S3
+// ESP32-S3-WROOM-1 N16R8: GPIO 4/5/6 sit next to each other on the left header.
+// Avoid 35-37 (octal PSRAM), 19/20 (USB), 43/44 (serial), 0/3/45/46 (boot pins).
+#define I2S_DOUT_GPIO 4
+#define I2S_BCLK_GPIO 5
+#define I2S_LRC_GPIO  6
+#else
+// Original ESP32 (physically traced, don't re-derive from a diagram)
+#define I2S_DOUT_GPIO 33
+#define I2S_BCLK_GPIO 25
+#define I2S_LRC_GPIO  32
+#endif
 #define I2S_PORT I2S_NUM_0
-#define I2S_SAMPLE_RATE 16000
 
-// W25Q64JV SPI flash (8MB), on the ESP32's hardware VSPI bus. VSPI's
-// default pins (SCK=18, MISO=19, MOSI=23) already match the physical
-// wiring, so the global `SPI` object needs no custom SPI.begin() pins —
-// only chip-select is board-specific.
-#define FLASH_CS_GPIO 5
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 2  // original ESP32 dev board's blue LED (the S3 core defines its RGB LED)
+#endif
+#define SAMPLE_RATE 16000   // tones are converted to 16 kHz 16-bit mono WAV by the web page
+#define RING_MAX_MS 60000   // stop ringing after 1 minute if nobody presses Stop
+
+// Live voice from the browser (same 16 kHz mono format as tones)
+#define TALK_BUF_SAMPLES 4096  // 256 ms ring buffer; when full the oldest audio is dropped
+#define TALK_PREBUFFER   1600  // wait for 100 ms of audio before playing, to ride out Wi-Fi hiccups
+#define TALK_DRY_MS      150   // no audio for longer than the I2S queue holds → buffer up again
+
+#define STATS_INTERVAL_MS 2000  // how often RAM/storage/CPU stats go to the web page
 
 WebSocketsClient webSocket;
 WiFiManager wm;
 String deviceId;
+IPAddress serverIp;
+Preferences prefs;
 
-Adafruit_FlashTransport_SPI flashTransport(FLASH_CS_GPIO, SPI);
-Adafruit_SPIFlash flash(&flashTransport);
-FatVolume fatfs;
-bool flashReady = false;
+int volume = 70;          // 0-100, saved in flash so it survives a restart
+int32_t volumeGain = 0;   // 0-256 multiplier applied to every sample
 
-static void flashLed() {
-  digitalWrite(LED_GPIO, HIGH);
+HTTPClient http;
+WiFiClient *toneStream = nullptr;
+String ringingTone;           // empty = not ringing
+int32_t toneBytesLeft = 0;
+unsigned long ringStart = 0;
+
+int16_t talkBuf[TALK_BUF_SAMPLES];
+size_t talkHead = 0, talkCount = 0;  // read position, samples buffered
+bool talking = false, talkPlaying = false, talkEnding = false;
+unsigned long talkLastPlayed = 0;
+
+void blink() {
+  digitalWrite(LED_BUILTIN, HIGH);
   delay(300);
-  digitalWrite(LED_GPIO, LOW);
+  digitalWrite(LED_BUILTIN, LOW);
 }
 
-static void i2sSetup() {
+// Squared curve: ears hear loudness logarithmically, so a linear slider
+// would do almost nothing in its top half.
+void setVolume(int v) {
+  volume = constrain(v, 0, 100);
+  volumeGain = volume * volume * 256 / 10000;
+}
+
+inline int16_t applyVolume(int16_t s) {
+  return (int32_t)s * volumeGain >> 8;
+}
+
+void sendVolume() {
+  String msg = "{\"type\":\"volume\",\"value\":" + String(volume) + "}";
+  webSocket.sendTXT(msg);
+}
+
+// CPU load per core = share of time its idle task did NOT run since the last
+// call (FreeRTOS run-time stats are enabled in the ESP32 Arduino core).
+void cpuLoad(int out[2]) {
+  static uint32_t lastIdle[2] = {0, 0};
+  static uint32_t lastTime = 0;
+  uint32_t now = (uint32_t)esp_timer_get_time();  // µs; unsigned math survives the wrap
+  uint32_t elapsed = now - lastTime;
+  for (int core = 0; core < 2; core++) {
+    uint32_t idle = ulTaskGetIdleRunTimeCounterForCore(core);
+    uint32_t idleDelta = idle - lastIdle[core];
+    out[core] = (lastTime && elapsed) ? constrain(100 - (int)(100ULL * idleDelta / elapsed), 0, 100) : 0;
+    lastIdle[core] = idle;
+  }
+  lastTime = now;
+}
+
+// Measured once in setup(): ESP.getSketchSize() re-checksums the whole
+// program in flash (~1 MB) on every call, which froze audio when it ran
+// every 2 s. The size can't change while running anyway.
+uint32_t appUsed = 0, appTotal = 0;
+
+void sendStats() {
+  nvs_stats_t nvs = {};
+  nvs_get_stats(NULL, &nvs);
+  int cpu[2];
+  cpuLoad(cpu);
+
+  JsonDocument doc;
+  doc["type"] = "stats";
+  doc["heapFree"] = ESP.getFreeHeap();
+  doc["heapTotal"] = ESP.getHeapSize();
+  doc["heapMin"] = ESP.getMinFreeHeap();       // lowest free RAM since boot
+  doc["heapMaxBlock"] = ESP.getMaxAllocHeap(); // largest single free block
+  doc["psramTotal"] = ESP.getPsramSize();      // 0 on boards without PSRAM
+  doc["psramFree"] = ESP.getFreePsram();
+  doc["appUsed"] = appUsed;
+  doc["appTotal"] = appTotal;
+  doc["nvsUsed"] = nvs.used_entries;           // settings storage (Wi-Fi, volume)
+  doc["nvsTotal"] = nvs.total_entries;
+  doc["flashSize"] = ESP.getFlashChipSize();
+  doc["cpuMhz"] = ESP.getCpuFreqMHz();
+  doc["cpu"][0] = cpu[0];                      // core 0: Wi-Fi
+  doc["cpu"][1] = cpu[1];                      // core 1: this sketch
+  doc["uptime"] = millis() / 1000;
+  doc["rssi"] = WiFi.RSSI();
+
+  String out;
+  serializeJson(doc, out);
+  webSocket.sendTXT(out);
+}
+
+// ---- Flash layout: every partition, its size, and how much is used ----
+// Built once in setup() (the layout can't change while running) and sent
+// whenever the server connects or a page asks.
+String partitionsJson;
+
+// Mount a file-storage partition read-only for a moment to see how full it is
+void fileStorageUsage(JsonObject o, const esp_partition_t *p) {
+#ifdef MEASURE_FILE_STORAGE
+  bool fat = p->subtype == ESP_PARTITION_SUBTYPE_DATA_FAT;
+  if (fat && FFat.begin(false, "/ffat", 1, p->label)) {
+    o["used"] = FFat.usedBytes();
+    o["fsTotal"] = FFat.totalBytes();
+    FFat.end();
+    o["note"] = "file storage (FAT)";
+    return;
+  }
+  if (!fat && LittleFS.begin(false, "/littlefs", 1, p->label)) {
+    o["used"] = LittleFS.usedBytes();
+    o["fsTotal"] = LittleFS.totalBytes();
+    LittleFS.end();
+    o["note"] = "file storage (LittleFS)";
+    return;
+  }
+  o["note"] = "file storage (empty, not formatted yet)";
+#else
+  o["note"] = "file storage (usage not measured on this board)";
+#endif
+}
+
+void buildPartitions() {
+  JsonDocument doc;
+  doc["type"] = "partitions";
+  doc["flashSize"] = ESP.getFlashChipSize();
+  JsonArray list = doc["list"].to<JsonArray>();
+  const esp_partition_t *running = esp_ota_get_running_partition();
+
+  // esp_partition_next() frees the iterator itself when it reaches the end
+  for (esp_partition_iterator_t it = esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, NULL);
+       it; it = esp_partition_next(it)) {
+    const esp_partition_t *p = esp_partition_get(it);
+    JsonObject o = list.add<JsonObject>();
+    o["name"] = p->label;
+    o["offset"] = p->address;
+    o["size"] = p->size;
+
+    if (p->type == ESP_PARTITION_TYPE_APP) {
+      o["kind"] = "app";
+      if (p == running) { o["used"] = appUsed; o["note"] = "running program"; }
+      else o["note"] = "spare slot for over-the-air updates";
+      continue;
+    }
+    switch (p->subtype) {
+      case ESP_PARTITION_SUBTYPE_DATA_NVS: {
+        nvs_stats_t s = {};
+        nvs_get_stats(p->label, &s);
+        o["kind"] = "nvs";
+        if (s.total_entries) o["used"] = (uint64_t)p->size * s.used_entries / s.total_entries;
+        o["note"] = "settings (Wi-Fi, volume)";
+        break;
+      }
+      case ESP_PARTITION_SUBTYPE_DATA_FAT:
+      case ESP_PARTITION_SUBTYPE_DATA_SPIFFS:  // LittleFS uses this subtype too
+        o["kind"] = "files";
+        fileStorageUsage(o, p);
+        break;
+      case ESP_PARTITION_SUBTYPE_DATA_OTA:      o["kind"] = "system"; o["note"] = "which app slot to start"; break;
+      case ESP_PARTITION_SUBTYPE_DATA_COREDUMP: o["kind"] = "system"; o["note"] = "crash report storage"; break;
+      case ESP_PARTITION_SUBTYPE_DATA_PHY:      o["kind"] = "system"; o["note"] = "radio calibration"; break;
+      default:                                  o["kind"] = "other";
+    }
+  }
+  serializeJson(doc, partitionsJson);
+}
+
+void i2sSetup() {
   i2s_config_t config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-    .sample_rate = I2S_SAMPLE_RATE,
+    .sample_rate = SAMPLE_RATE,
     .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
     .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 4,
+    .dma_buf_count = 8,
     .dma_buf_len = 256,
     .use_apll = false,
     .tx_desc_auto_clear = true
@@ -80,391 +240,201 @@ static void i2sSetup() {
   i2s_zero_dma_buffer(I2S_PORT);
 }
 
-// Fresh W25Q64JV chips (or ones formatted with something other than
-// FAT12/16) won't mount — that's a one-time setup step, not a wiring bug.
-// See esp32/format_flash/format_flash.ino: flash it once, format, then come
-// back to this sketch.
-static void flashSetup() {
-  // On a generic ESP32 dev board (not one of Adafruit's own, which this
-  // library was primarily built for), the VSPI bus needs to be explicitly
-  // started before the flash transport touches it — otherwise
-  // Adafruit_SPIFlash ends up dereferencing an uninitialized internal SPI
-  // handle, which crashes with exactly a LoadProhibited/null-pointer panic.
-  SPI.begin();
-  if (!flash.begin()) {
-    Serial.println("Error initializing W25Q64 SPI flash chip (check wiring/CS pin).");
-    return;
-  }
-
-  // flash.begin() auto-speeds the SPI clock up to this chip's rated
-  // maximum (133MHz for the W25Q64JV) -- far beyond what breadboard
-  // jumper wires can reliably carry. Confirmed on the bench: every bulk
-  // read/write after begin() silently returned garbage (all zeros) at
-  // that speed while still reporting success, traced by dumping the
-  // Adafruit_SPIFlash cache's actual buffer contents in format_flash.ino.
-  // Forcing it back down to a speed the wiring can sustain.
-  flashTransport.setClockSpeed(1000000, 1000000);
-
-  if (!fatfs.begin(&flash)) {
-    Serial.println("Error mounting FAT filesystem on flash — it may need formatting once "
-                    "(see esp32/format_flash/format_flash.ino).");
-    return;
-  }
-  flashReady = true;
-  Serial.println("External SPI flash mounted.");
-}
-
-static void sendJson(JsonDocument &doc) {
-  String out;
-  serializeJson(doc, out);
-  webSocket.sendTXT(out);
-}
-
-static void sendSyncResult(const String &id, bool ok, const String &reason = "") {
-  StaticJsonDocument<256> doc;
-  doc["type"] = "sync_result";
-  doc["id"] = id;
-  doc["ok"] = ok;
-  if (reason.length()) doc["reason"] = reason;
-  sendJson(doc);
-}
-
-static void sendPlayFailed(const String &id, const String &reason) {
-  StaticJsonDocument<192> doc;
-  doc["type"] = "play_failed";
-  doc["id"] = id;
-  doc["reason"] = reason;
-  sendJson(doc);
-}
-
-// Full reconciliation of what's actually on the flash chip — sent after
-// every mount/sync/delete so the server's manifest never drifts from
-// reality (the device is the source of truth, never the server's memory
-// of what it last heard).
-static void sendFsReport() {
-  StaticJsonDocument<2048> doc;
-  doc["type"] = "fs_report";
-  doc["present"] = flashReady;
-  JsonArray files = doc.createNestedArray("files");
-
-  if (flashReady) {
-    File32 root = fatfs.open("/");
-    File32 entry = root.openNextFile();
-    while (entry) {
-      if (!entry.isDirectory()) {
-        char name[64];
-        entry.getName(name, sizeof(name));
-        String n(name);
-        if (!n.startsWith(".tmp_")) {  // half-downloaded files aren't real sounds yet
-          JsonObject o = files.createNestedObject();
-          o["id"] = n;
-          o["size"] = entry.size();
-        }
-      }
-      entry.close();
-      entry = root.openNextFile();
-    }
-    root.close();
-  }
-  sendJson(doc);
-}
-
-// Streams a sound straight from flash to the I2S DMA buffer. Assumes a
-// standard 44-byte PCM WAV header, which is skipped. Blocking, same
-// tradeoff flashLed() already makes (see README) — fine for a single demo
-// device, would need a background task if multiple long sounds and
-// mid-playback "stop" both matter later.
-static void playWavFromFlash(const String &id) {
-  if (!flashReady) {
-    sendPlayFailed(id, "no_flash");
-    return;
-  }
-  String path = "/" + id;
-  File32 audioFile = fatfs.open(path.c_str(), O_READ);
-  if (!audioFile) {
-    Serial.printf("Failed to open %s\n", path.c_str());
-    sendPlayFailed(id, "file_missing");
-    return;
-  }
-
-  Serial.printf("Playing %s from flash\n", path.c_str());
-  audioFile.seek(44);  // skip the WAV header
-
-  const int bufSize = 512;
-  uint8_t buf[bufSize];
-  while (audioFile.available()) {
-    int n = audioFile.read(buf, bufSize);
-    if (n <= 0) break;
-    size_t bytesWritten;
-    i2s_write(I2S_PORT, buf, n, &bytesWritten, portMAX_DELAY);
-  }
-  audioFile.close();
-  i2s_zero_dma_buffer(I2S_PORT);
-  Serial.println("Playback complete");
-}
-
-// Hardcoded placeholder "sound" — a plain 1kHz tone, synthesized on the
-// fly, no flash file involved. Kept as the fallback for a `play_sound`
-// with no `id` (e.g. manual testing), same role it had before flash
-// storage existed: proving the amp+speaker chain works on its own.
-static void playTestTone() {
-  const float freqHz = 1000.0f;
-  const int durationMs = 500;
-  const int totalSamples = I2S_SAMPLE_RATE * durationMs / 1000;
-  const int16_t amplitude = 6000; // headroom under full-scale (32767)
-
-  Serial.println("Playing test tone");
-  int16_t buf[128 * 2]; // stereo interleaved, L=R (mono duplicated)
-  int samplesDone = 0;
-  while (samplesDone < totalSamples) {
-    int chunk = min(128, totalSamples - samplesDone);
-    for (int i = 0; i < chunk; i++) {
-      int16_t sample = (int16_t)(amplitude * sinf(2.0f * PI * freqHz * (samplesDone + i) / I2S_SAMPLE_RATE));
-      buf[i * 2] = sample;
-      buf[i * 2 + 1] = sample;
-    }
-    size_t bytesWritten;
-    i2s_write(I2S_PORT, buf, chunk * 2 * sizeof(int16_t), &bytesWritten, portMAX_DELAY);
-    samplesDone += chunk;
-  }
-}
-
-static void deleteSoundById(const String &id) {
-  if (!flashReady) return;
-  fatfs.remove(("/" + id).c_str());
-  sendFsReport();
-}
-
-// Downloads a sound from the backend server and saves it to flash.
-// Temp-name-then-atomic-rename: a half-downloaded or corrupted file can
-// never be mistaken for a valid one, even across a power loss mid-download.
-static void handleSyncFile(const String &id, const String &url, size_t expectedSize) {
-  if (!flashReady) {
-    sendSyncResult(id, false, "no_flash");
-    return;
-  }
-  Serial.printf("Syncing %s from %s (expecting %u bytes)\n", id.c_str(), url.c_str(), (unsigned)expectedSize);
-
-  String tmpPath = "/.tmp_" + id;
-  String finalPath = "/" + id;
-  fatfs.remove(tmpPath.c_str());  // clear out any stale temp file from a previous failed attempt
-
-  File32 f = fatfs.open(tmpPath.c_str(), O_WRITE | O_CREAT | O_TRUNC);
-  if (!f) {
-    Serial.println("Failed to open temp file for writing");
-    sendSyncResult(id, false, "flash_write_error");
-    return;
-  }
-
-  HTTPClient http;
-  http.begin(url);
-  int httpCode = http.GET();
-  if (httpCode != HTTP_CODE_OK) {
-    Serial.printf("Download failed, HTTP %d\n", httpCode);
-    f.close();
-    fatfs.remove(tmpPath.c_str());
-    http.end();
-    sendSyncResult(id, false, "download_failed");
-    return;
-  }
-
-  WiFiClient *stream = http.getStreamPtr();
-  size_t written = 0;
-  uint8_t buf[512];
-  unsigned long lastByte = millis();
-  while (http.connected() && written < expectedSize) {
-    size_t avail = stream->available();
-    if (avail) {
-      int n = stream->readBytes(buf, min(avail, sizeof(buf)));
-      f.write(buf, n);
-      written += n;
-      lastByte = millis();
-    } else if (millis() - lastByte > 10000) {
-      Serial.println("Download stalled, giving up");
-      break;
-    } else {
-      delay(1);
-    }
-  }
-  f.close();
+// Starts (or restarts, for looping) the HTTP download of the ringing tone
+bool openTone() {
   http.end();
-
-  bool ok = (written == expectedSize);
-  if (ok) {
-    fatfs.remove(finalPath.c_str());  // overwriting an existing sound with the same id
-    fatfs.rename(tmpPath.c_str(), finalPath.c_str());
-    Serial.printf("Synced %s (%u bytes)\n", id.c_str(), (unsigned)written);
-  } else {
-    Serial.printf("Size mismatch on %s: got %u, expected %u\n", id.c_str(), (unsigned)written, (unsigned)expectedSize);
-    fatfs.remove(tmpPath.c_str());
-  }
-  sendSyncResult(id, ok, ok ? "" : "size_mismatch");
-  sendFsReport();
+  toneBytesLeft = 0;
+  http.begin("http://" + serverIp.toString() + ":" + String(SERVER_PORT) + "/tones/" + ringingTone);
+  if (http.GET() != HTTP_CODE_OK) return false;
+  toneStream = http.getStreamPtr();
+  uint8_t header[44];  // standard WAV header, as written by the web page
+  if (toneStream->readBytes(header, sizeof(header)) != sizeof(header)) return false;
+  toneBytesLeft = http.getSize() - sizeof(header);
+  return toneBytesLeft > 0;
 }
 
-static void resetWifiAndRestart() {
-  Serial.println("Forgetting Wi-Fi, restarting into setup portal...");
-  wm.resetSettings();
-  delay(500);
-  ESP.restart();
+void stopTone() {
+  if (ringingTone.isEmpty()) return;
+  http.end();
+  ringingTone = "";
+  i2s_zero_dma_buffer(I2S_PORT);
+  Serial.println("Ringing stopped");
+  webSocket.sendTXT("{\"type\":\"stopped\"}");
 }
 
-static void onWsEvent(WStype_t type, uint8_t *payload, size_t length) {
-  switch (type) {
-    case WStype_CONNECTED: {
-      Serial.println("Connected to server");
-      String hello = "{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\"}";
-      webSocket.sendTXT(hello);
-      sendFsReport();  // reconcile the server's manifest with what's really on flash
-      break;
+void stopTalk() {
+  if (!talking) return;
+  talking = false;
+  talkCount = 0;
+  i2s_zero_dma_buffer(I2S_PORT);
+  Serial.println("Talk stopped");
+  webSocket.sendTXT("{\"type\":\"talk_stopped\"}");
+}
+
+void startTalk() {
+  stopTone();
+  stopTalk();
+  talking = true;
+  talkPlaying = talkEnding = false;
+  talkHead = talkCount = 0;
+  Serial.println("Talk started");
+  webSocket.sendTXT("{\"type\":\"talking\"}");
+}
+
+// Binary WebSocket chunk: little-endian 16-bit samples (read byte-wise, the payload may be unaligned)
+void talkPush(const uint8_t *data, size_t len) {
+  for (size_t i = 0; i + 1 < len; i += 2) {
+    if (talkCount == TALK_BUF_SAMPLES) {  // full (browser clock slightly fast): drop oldest
+      talkHead = (talkHead + 1) % TALK_BUF_SAMPLES;
+      talkCount--;
     }
-    case WStype_DISCONNECTED:
-      Serial.println("WS disconnected");
-      break;
-    case WStype_TEXT: {
-      String msg((char *)payload, length);
-      Serial.printf("Received: %s\n", msg.c_str());
+    talkBuf[(talkHead + talkCount) % TALK_BUF_SAMPLES] = (int16_t)(data[i] | (data[i + 1] << 8));
+    talkCount++;
+  }
+}
 
-      StaticJsonDocument<512> doc;
-      DeserializationError err = deserializeJson(doc, msg);
-      if (err) {
-        Serial.println("Bad JSON, ignoring");
-        break;
+// Same idea as pumpTone(): one small chunk per loop() so the WebSocket keeps being serviced
+void pumpTalk() {
+  if (!talking) return;
+  if (!talkPlaying) {
+    if (talkCount < TALK_PREBUFFER && !talkEnding) return;
+    talkPlaying = true;
+  }
+  if (talkCount == 0) {
+    if (talkEnding) stopTalk();                                        // played out the last words
+    else if (millis() - talkLastPlayed > TALK_DRY_MS) talkPlaying = false;  // starved: buffer up again
+    return;
+  }
+
+  int16_t stereo[512];
+  size_t n = min(talkCount, (size_t)256);
+  for (size_t i = 0; i < n; i++) {
+    stereo[2 * i] = stereo[2 * i + 1] = applyVolume(talkBuf[talkHead]);
+    talkHead = (talkHead + 1) % TALK_BUF_SAMPLES;
+  }
+  talkCount -= n;
+  size_t written;
+  i2s_write(I2S_PORT, stereo, n * 4, &written, portMAX_DELAY);
+  talkLastPlayed = millis();
+}
+
+void startTone(const String &tone) {
+  stopTalk();  // an alarm wins over live talk
+  stopTone();
+  ringingTone = tone;
+  ringStart = millis();
+  Serial.println("Ringing: " + tone);
+  if (openTone()) webSocket.sendTXT("{\"type\":\"ringing\"}");
+  else stopTone();
+}
+
+// Plays one small chunk per call so webSocket.loop() keeps running and
+// "stop" works mid-ring. Loops the tone until stopped or RING_MAX_MS.
+void pumpTone() {
+  if (ringingTone.isEmpty()) return;
+  if (millis() - ringStart > RING_MAX_MS) return stopTone();
+  if (toneBytesLeft < 2) {  // end of file: play it again
+    if (!openTone()) stopTone();
+    return;
+  }
+
+  size_t avail = toneStream->available();
+  if (avail < 2) {
+    if (!http.connected()) stopTone();  // server went away mid-stream
+    return;
+  }
+
+  int16_t mono[256], stereo[512];
+  size_t want = min(min(avail, sizeof(mono)), (size_t)toneBytesLeft) & ~(size_t)1;
+  int samples = toneStream->read((uint8_t *)mono, want) / 2;
+  toneBytesLeft -= samples * 2;
+  for (int i = 0; i < samples; i++) stereo[2 * i] = stereo[2 * i + 1] = applyVolume(mono[i]);
+  size_t written;
+  i2s_write(I2S_PORT, stereo, samples * 4, &written, portMAX_DELAY);
+}
+
+void onWsEvent(WStype_t type, uint8_t *payload, size_t length) {
+  if (type == WStype_CONNECTED) {
+    Serial.println("Connected to server");
+    String hello = "{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\"}";
+    webSocket.sendTXT(hello);
+    sendVolume();
+    webSocket.sendTXT(partitionsJson);
+  } else if (type == WStype_BIN) {
+    if (talking) talkPush(payload, length);
+  } else if (type == WStype_TEXT) {
+    JsonDocument doc;
+    if (deserializeJson(doc, payload, length)) return;
+    String cmd = doc["type"] | "";
+    Serial.println("Command: " + cmd);
+
+    if (cmd == "blink") blink();
+    else if (cmd == "ring") startTone(doc["tone"] | "");
+    else if (cmd == "stop") { stopTone(); stopTalk(); }
+    else if (cmd == "talk_start") startTalk();
+    else if (cmd == "talk_stop") talkEnding = true;  // finish what's buffered, then stop
+    else if (cmd == "volume") {  // with "value": set it; without: just report it
+      if (doc["value"].is<int>()) {
+        setVolume(doc["value"].as<int>());
+        prefs.putUChar("vol", volume);
       }
-
-      const char *msgType = doc["type"] | "";
-      const char *target = doc["target"] | "";
-      // A command with no "target" field is legacy/broadcast; otherwise it
-      // must name this device specifically.
-      bool forThisDevice = (strlen(target) == 0) || (deviceId == target);
-      if (!forThisDevice) break;
-
-      if (strcmp(msgType, "reset_wifi") == 0) {
-        resetWifiAndRestart();
-      } else if (strcmp(msgType, "flash") == 0) {
-        Serial.println("Received FLASH");
-        flashLed();
-      } else if (strcmp(msgType, "play_sound") == 0) {
-        const char *id = doc["id"] | "";
-        if (strlen(id) > 0) playWavFromFlash(String(id));
-        else playTestTone();  // no id given: manual test-tone path
-      } else if (strcmp(msgType, "stop_sound") == 0) {
-        // Playback is blocking (see playWavFromFlash), so there's no
-        // running playback to interrupt by the time this is processed —
-        // noted as a known limitation, not silently ignored.
-        Serial.println("stop_sound received (playback isn't interruptible mid-stream yet)");
-      } else if (strcmp(msgType, "delete_sound") == 0) {
-        const char *id = doc["id"] | "";
-        if (strlen(id) > 0) deleteSoundById(String(id));
-      } else if (strcmp(msgType, "sync_file") == 0) {
-        const char *id = doc["id"] | "";
-        const char *url = doc["url"] | "";
-        long expectedSize = doc["expectedSize"] | 0;
-        if (strlen(id) > 0 && strlen(url) > 0) handleSyncFile(String(id), String(url), (size_t)expectedSize);
-      }
-      break;
+      sendVolume();
     }
-    default:
-      break;
-  }
-}
-
-static IPAddress resolveServer() {
-  Serial.printf("Looking for %s.local on the network...\n", SERVER_MDNS_NAME);
-  IPAddress ip;
-  for (int attempt = 0; attempt < 15; attempt++) {
-    ip = MDNS.queryHost(SERVER_MDNS_NAME);
-    if (ip != IPAddress(0, 0, 0, 0)) return ip;
-    Serial.println("  not found yet, retrying...");
-    delay(1000);
-  }
-  return IPAddress(0, 0, 0, 0);
-}
-
-static void checkResetButton() {
-  static unsigned long pressStart = 0;
-  if (digitalRead(RESET_BUTTON_GPIO) == LOW) {
-    if (pressStart == 0) {
-      pressStart = millis();
-    } else if (millis() - pressStart >= RESET_HOLD_MS) {
-      resetWifiAndRestart();
-    }
-  } else {
-    pressStart = 0;
+    else if (cmd == "partitions") webSocket.sendTXT(partitionsJson);
+    else if (cmd == "reset_wifi") { wm.resetSettings(); ESP.restart(); }
   }
 }
 
 void setup() {
   Serial.begin(115200);
-
-  pinMode(LED_GPIO, OUTPUT);
-  digitalWrite(LED_GPIO, LOW);
-  pinMode(RESET_BUTTON_GPIO, INPUT_PULLUP);
-
+  pinMode(LED_BUILTIN, OUTPUT);  // GPIO 2 on ESP32, the RGB LED (GPIO 48) on the S3
   i2sSetup();
-  flashSetup();
+  prefs.begin("audio");
+  setVolume(prefs.getUChar("vol", 70));
+  appUsed = ESP.getSketchSize();
+  appTotal = appUsed + ESP.getFreeSketchSpace();
+  buildPartitions();
 
-  // WiFi.macAddress() can read back all zeros depending on exactly when
-  // it's called relative to the Wi-Fi driver's init state. Reading the
-  // factory-burned MAC straight from eFuse instead sidesteps that
-  // entirely — it doesn't depend on the Wi-Fi driver being started at all.
-  uint8_t mac[6];
-  esp_read_mac(mac, ESP_MAC_WIFI_STA);
-  char macStr[13];
-  snprintf(macStr, sizeof(macStr), "%02x%02x%02x%02x%02x%02x",
-           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  // Factory MAC from eFuse, e.g. "esp32-246f28ae5278"
+  uint64_t mac = ESP.getEfuseMac();
+  char id[19];
+  snprintf(id, sizeof(id), "esp32-%02x%02x%02x%02x%02x%02x",
+           (uint8_t)mac, (uint8_t)(mac >> 8), (uint8_t)(mac >> 16),
+           (uint8_t)(mac >> 24), (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
+  deviceId = id;
+  Serial.println("Device ID: " + deviceId);
 
-  // Computed early so it can be shown on the setup portal page itself, not
-  // just printed to a serial console nobody but us can see during onboarding.
-  // Already lowercase (matches the server, which lowercases every deviceId
-  // it handles — pairing input, claims, relayed "target" fields).
-  deviceId = "esp32-" + String(macStr);
-  Serial.print("Device ID: ");
-  Serial.println(deviceId);
+  // No saved Wi-Fi (or it's unreachable)? Opens hotspot "LED-Setup-xxxx":
+  // join it from a phone, pick your network, enter the password.
+  String apName = "LED-Setup-" + deviceId.substring(deviceId.length() - 4);
+  if (!wm.autoConnect(apName.c_str())) ESP.restart();
+  Serial.println("Wi-Fi connected, IP: " + WiFi.localIP().toString());
 
-  // No SSID/password in code: on first boot (or if the saved network is
-  // unreachable) this opens a "LED-Demo-Setup" access point with a web
-  // form where you pick your Wi-Fi and enter the password. It's saved to
-  // flash, so this only happens again if the network changes (or you use
-  // the "Reconfigure Wi-Fi" button in the frontend).
-  String idHtml = "<p><b>Device ID (enter this in the app to pair):</b><br>" + deviceId + "</p>";
-  WiFiManagerParameter idDisplay(idHtml.c_str());
-  wm.addParameter(&idDisplay);
-
-  if (!wm.autoConnect("LED-Demo-Setup")) {
-    Serial.println("Wi-Fi setup failed/timed out, restarting");
-    ESP.restart();
+  WiFi.setSleep(false);  // power-save mode drops mDNS replies
+  MDNS.begin(deviceId.c_str());
+  while ((serverIp = MDNS.queryHost(SERVER_MDNS_NAME)) == IPAddress(0, 0, 0, 0)) {
+    Serial.println("Looking for " SERVER_MDNS_NAME ".local ...");
+    delay(1000);
   }
-  Serial.print("WiFi ready, IP: ");
-  Serial.println(WiFi.localIP());
-  Serial.print("Device ID: ");
-  Serial.println(deviceId);
-  Serial.println("Hold the BOOT button 10s at any time to forget Wi-Fi and reopen setup.");
+  Serial.println("Server found at " + serverIp.toString());
 
-  // Wi-Fi power-save mode makes the radio sleep between beacons, which
-  // often drops incoming multicast frames (mDNS responses included) even
-  // though ordinary unicast traffic keeps working fine. Disable it so
-  // mDNS resolves reliably.
-  WiFi.setSleep(false);
-
-  if (!MDNS.begin("esp32-led")) {
-    Serial.println("mDNS init failed");
-  }
-
-  IPAddress serverIp = resolveServer();
-  if (serverIp == IPAddress(0, 0, 0, 0)) {
-    Serial.println("Could not resolve server via mDNS, restarting to retry");
-    ESP.restart();
-  }
-  Serial.print("Found server at: ");
-  Serial.println(serverIp);
-
-  webSocket.begin(serverIp.toString().c_str(), WS_PORT, "/");
+  webSocket.begin(serverIp.toString(), SERVER_PORT, "/");
   webSocket.onEvent(onWsEvent);
   webSocket.setReconnectInterval(3000);
 }
 
 void loop() {
   webSocket.loop();
-  checkResetButton();
+  pumpTone();
+  pumpTalk();
+
+  static unsigned long lastStats = 0;
+  if (webSocket.isConnected() && millis() - lastStats >= STATS_INTERVAL_MS) {
+    lastStats = millis();
+    sendStats();
+  }
+
+  // Let core 1's idle task run, so CPU load reads true (and the chip runs cooler).
+  // Safe for audio: each pass moves 16 ms of sound and the I2S queue holds 128 ms.
+  delay(1);
 }

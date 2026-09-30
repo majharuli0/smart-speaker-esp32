@@ -6,7 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 // Settings come from the environment (or backend/.env, see .env.example)
-const PORT = Number(process.env.PORT) || 3000;
+const PORT = Number(process.env.PORT ?? 3000); // ?? not ||: PORT=0 (tests) must stay 0
 const MDNS_HOST = process.env.MDNS_HOST || 'led-server.local';
 const MDNS_ENABLED = process.env.MDNS !== 'off'; // tests turn it off
 const DATA_DIR = path.resolve(__dirname, process.env.DATA_DIR || '.');
@@ -39,7 +39,11 @@ app.post('/tones', express.raw({ type: () => true, limit: '20mb' }), (req, res) 
   res.end();
 });
 
-const server = app.listen(PORT, () => console.log(`Server on http://localhost:${PORT}`));
+// PORT=0 picks a free port (tests use this); log the real one
+const server = app.listen(PORT, (err) => {
+  if (err) throw err; // e.g. port already in use
+  console.log(`Server on http://localhost:${server.address().port}`);
+});
 
 // Answer mDNS lookups for led-server.local with this machine's LAN IP, so
 // the ESP32 finds the server without a hardcoded address. The UDP "connect"

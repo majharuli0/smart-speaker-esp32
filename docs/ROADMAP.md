@@ -39,7 +39,7 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 - [x] **0.4 Firmware config.** A `config.h` holding the server host/port, feature switches and pins, instead of values scattered through the sketch. The server address can later come from setup and be saved on the device.
 - [x] **0.5 Firmware version.** `FW_VERSION` sent in `hello` and shown on the device card.
 - [x] **0.6 Backend hygiene.** `npm start` / `npm run dev` / `npm test` / `npm run check`. Settings come from `backend/.env` (`PORT`, `MDNS_HOST`, `MDNS`, `DATA_DIR`; see `.env.example`), read by Node's built-in `.env` support, so no new packages. `.editorconfig` keeps formatting consistent. A full formatter (Prettier) was left out to keep dependencies at zero; add it if the code grows.
-- [ ] **0.7 Real tests.** Move the ad-hoc simulated-device tests into `backend/test/` using `node:test`. Cover the alarm scheduler (timezones, dedup, weekdays), the relay, tone upload (filename sanitizing), talk routing and volume.
+- [x] **0.7 Real tests.** Move the ad-hoc simulated-device tests into `backend/test/` using `node:test`. Cover the alarm scheduler (timezones, dedup, weekdays), the relay, tone upload (filename sanitizing), talk routing and volume.
 - [ ] **0.8 CI.** GitHub Actions: build the firmware for esp32s3 (and esp32), run the backend tests on every push.
 - [ ] **0.9 Protocol spec.** `docs/protocol.md` as the single source for every message type, moved out of the README.
 

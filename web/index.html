@@ -53,7 +53,7 @@
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MAX_TONE_SECONDS = 30;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {}, alarmVersions: {}, acked: {} };
+  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {}, alarmVersions: {}, acked: {}, cache: {} };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
   const uidOf = (id) => id.replace('esp32-', '').toUpperCase(); // display only; commands use id
@@ -101,8 +101,8 @@
     } else if (msg.type === 'talk_denied') {
       stopTalk();
       alert(msg.reason === 'busy' ? 'Someone else is already talking to this device.' : 'Device is offline.');
-    } else if (msg.type === 'alarms_ack') {
-      state.acked[msg.deviceId] = msg;
+    } else if (msg.type === 'alarms_ack' || msg.type === 'cache') {
+      state[msg.type === 'cache' ? 'cache' : 'acked'][msg.deviceId] = msg;
       const el = document.getElementById(`sync-${msg.deviceId}`);
       if (el) el.innerHTML = syncHtml(msg.deviceId);
     }
@@ -186,7 +186,12 @@
     if (!ack) return 'waiting for the device to confirm its alarms…';
     const current = expected ? ack.version === expected : ack.count === 0;
     const n = Number(ack.count) || 0;
-    return current ? `✓ ${n} alarm${n === 1 ? '' : 's'} saved on the device (rings even without internet)` : '⏳ sending alarms to the device…';
+    const alarmsLine = current ? `✓ ${n} alarm${n === 1 ? '' : 's'} saved on the device (rings even without internet)` : '⏳ sending alarms to the device…';
+    // Boards with tone storage (S3) report how many of their alarms' tones are stored
+    const c = state.cache[id];
+    if (!c || !Number(c.wanted)) return alarmsLine;
+    const stored = Number(c.stored) || 0, wanted = Number(c.wanted);
+    return `${alarmsLine} · ${stored === wanted ? '🎵' : '⏳'} ${stored} of ${wanted} tone${wanted === 1 ? '' : 's'} stored on the device${stored === wanted ? '' : ' (downloading…)'}`;
   }
 
   function render() {

@@ -5,6 +5,10 @@
 #include "driver/i2s.h"
 #include "config.h"
 #include "net.h"
+#include "tonecache.h"
+#ifdef TONE_CACHE
+#include <FFat.h>
+#endif
 
 static Preferences prefs;
 static int volume = DEFAULT_VOLUME;
@@ -17,6 +21,10 @@ static String ringingTone;
 static bool beeping = false;  // built-in beep instead of the tone
 static uint32_t beepSample = 0;
 static int32_t toneBytesLeft = 0;
+#ifdef TONE_CACHE
+static File toneFile;           // stored copy of the tone, when there is one
+static bool fromFile = false;
+#endif
 static unsigned long ringStart = 0;
 
 static int16_t talkBuf[TALK_BUF_SAMPLES];
@@ -89,11 +97,25 @@ void audioSetup() {
 
 // ---- Ringing a tone ----
 
-// Starts (or restarts, for looping) the HTTP download of the ringing tone
+// Starts (or restarts, for looping) the ringing tone: the copy stored on the
+// device if there is one (works offline, loops with no gap), else a download
 static bool openTone() {
   http.end();
   toneBytesLeft = 0;
   if (ringingTone.isEmpty()) return false;
+#ifdef TONE_CACHE
+  fromFile = false;
+  if (toneFile) toneFile.close();
+  String stored = cachedPath(ringingTone);
+  if (stored.length()) {
+    toneFile = FFat.open(stored, "r");
+    if (toneFile && toneFile.seek(44)) {  // skip the 44-byte WAV header
+      fromFile = true;
+      toneBytesLeft = toneFile.size() - 44;
+      return toneBytesLeft > 0;
+    }
+  }
+#endif
   http.setConnectTimeout(TONE_TIMEOUT_MS);  // don't hang when offline: beep instead
   http.setTimeout(TONE_TIMEOUT_MS);
   http.begin("http://" + serverAddress().toString() + ":" + String(SERVER_PORT) + "/tones/" + ringingTone);
@@ -128,6 +150,10 @@ void toneStop() {
   if (!ringing) return;
   ringing = beeping = false;
   http.end();
+#ifdef TONE_CACHE
+  if (toneFile) toneFile.close();
+  fromFile = false;
+#endif
   ringingTone = "";
   i2s_zero_dma_buffer(I2S_PORT);
   Serial.println("Ringing stopped");
@@ -140,8 +166,12 @@ void toneStart(const String &tone) {
   ringing = true;
   ringingTone = tone;
   ringStart = millis();
-  Serial.println("Ringing: " + tone);
   if (!openTone()) startBeep();
+#ifdef TONE_CACHE
+  Serial.println("Ringing: " + tone + (beeping ? "" : fromFile ? " (stored on device)" : " (streaming)"));
+#else
+  Serial.println("Ringing: " + tone);
+#endif
   netSend("{\"type\":\"ringing\"}");
 }
 
@@ -155,6 +185,18 @@ static void pumpTone() {
     if (!openTone()) startBeep();
     return;
   }
+
+#ifdef TONE_CACHE
+  if (fromFile) {
+    int16_t mono[256];
+    size_t want = min(sizeof(mono), (size_t)toneBytesLeft) & ~(size_t)1;
+    int samples = toneFile.read((uint8_t *)mono, want) / 2;
+    if (samples <= 0) { toneBytesLeft = 0; return; }  // end or read error: loop from the start
+    toneBytesLeft -= samples * 2;
+    playSamples(mono, samples);
+    return;
+  }
+#endif
 
   size_t avail = toneStream->available();
   if (avail < 2) {

@@ -58,7 +58,7 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 - [x] **1.2 Time.** NTP with the user's timezone (`configTzTime`, with a POSIX timezone string from the backend), periodic resync, and a "time is valid" flag. Alarms wait until the time is known.
 - [x] **1.3 Alarms on the device.** The server sends each device its own list (`alarms_sync`, versioned by content hash); the device saves it in flash, confirms with `alarms_ack`, and rings from its own clock once the time is valid. If the tone can't be downloaded it plays a built-in beep. Network start no longer blocks, so a device that restarts while the router is down keeps running and reconnects by itself.
 - [ ] **1.3b Alarm extras.** Snooze (9 min default, from a button or the page), volume fade-in, one-time alarms. After 1.6, since snooze needs the button.
-- [ ] **1.4 Tone cache (9.9 MB `ffat`).** Format on first boot. Download the tones the alarms use, named by content hash and checked with SHA-256, written to a temp file and then renamed. Delete the least recently used tones when full. Fall back to a built-in tone if a file is missing.
+- [x] **1.4 Tone cache (9.9 MB `ffat`).** Formatted on first boot. The alarm sync lists the tones the alarms use (size + SHA-256); the device downloads missing ones in the background to a temp file, checks size and SHA-256, renames it to its hash name, and deletes tones no alarm uses. Alarms play the stored copy (offline, gapless loop), then streaming, then the beep. S3 only.
 - [ ] **1.5 Built-in sounds.** Ding-dong and beep generated in code, no files needed, so they always work.
 
 **Physical interface**

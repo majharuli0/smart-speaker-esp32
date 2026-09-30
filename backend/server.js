@@ -62,6 +62,11 @@ app.post('/tones', express.raw({ type: () => true, limit: '20mb' }), (req, res) 
   if (!name.endsWith('.wav') || !req.body?.length) return res.status(400).end();
   fs.writeFileSync(path.join(TONES_DIR, name), req.body);
   toBrowsers({ type: 'tones', tones: listTones() });
+  const users = new Set(alarms.filter((a) => a.tone === name).map((a) => a.deviceId));
+  if (users.size) {
+    users.forEach(syncAlarms);
+    toBrowsers(alarmsMessage());
+  }
   res.end();
 });
 
@@ -117,21 +122,37 @@ function sendTimezone(deviceId) {
 // Hourly re-send keeps devices right across daylight-saving switches
 setInterval(() => devices.forEach((_, id) => sendTimezone(id)), 60 * 60 * 1000);
 
+// Size + SHA-256 of a tone file, so a device can store it and check the
+// download. Cached until the file changes (re-upload under the same name).
+const toneInfoCache = new Map();
+function toneInfo(name) {
+  let stat;
+  try { stat = fs.statSync(path.join(TONES_DIR, name)); } catch { return null; }
+  const cached = toneInfoCache.get(name);
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.info;
+  const sha256 = crypto.createHash('sha256').update(fs.readFileSync(path.join(TONES_DIR, name))).digest('hex');
+  const info = { name, size: stat.size, sha256 };
+  toneInfoCache.set(name, { mtimeMs: stat.mtimeMs, size: stat.size, info });
+  return info;
+}
+
 // Alarms ring on the device, from its own clock and time zone (so they work
 // with the network down). The server only keeps the list and sends each
-// device its own alarms: on connect and after every change. The version is a
-// hash of the content, so an unchanged list is recognised and not re-saved.
+// device its own alarms, plus the tones they use so the device can store
+// them: on connect and after every change. The version is a hash of all of
+// it, so an unchanged list is recognised and not re-saved.
 function alarmsFor(deviceId) {
   const list = alarms
     .filter((a) => a.deviceId === deviceId)
     .map(({ id, time, days, tone, enabled }) => ({ id, time, days, tone, enabled }));
-  const version = crypto.createHash('sha1').update(JSON.stringify(list)).digest('hex').slice(0, 8);
-  return { list, version };
+  const tones = [...new Set(list.map((a) => a.tone))].map(toneInfo).filter(Boolean);
+  const version = crypto.createHash('sha1').update(JSON.stringify({ list, tones })).digest('hex').slice(0, 8);
+  return { list, tones, version };
 }
 
 function syncAlarms(deviceId) {
-  const { list, version } = alarmsFor(deviceId);
-  toDevice(deviceId, { type: 'alarms_sync', version, alarms: list });
+  const { list, tones, version } = alarmsFor(deviceId);
+  toDevice(deviceId, { type: 'alarms_sync', version, alarms: list, tones });
 }
 
 // All alarms for the page, plus the version each device should confirm with alarms_ack

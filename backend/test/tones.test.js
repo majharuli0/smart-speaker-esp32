@@ -50,3 +50,39 @@ test('CORS allows the page to upload when opened from a file', async () => {
   assert.equal(res.headers.get('access-control-allow-origin'), '*');
   assert.match(res.headers.get('access-control-allow-headers'), /X-Filename/);
 });
+
+// ---- Tones the device should store (sent with its alarm list) ----
+const crypto = require('node:crypto');
+const { device, online } = require('./helpers');
+const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+
+test('alarm sync lists the tones the alarms use, with size and SHA-256', async () => {
+  const body = wav(4000);
+  await upload('cached.wav', body);
+  const br = await browser(server);
+  const dev = await device(server, 'esp32-cache1');
+  await online(br, 'esp32-cache1');
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-cache1', time: '07:00', days: [1], tone: 'cached.wav' } });
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-cache1', time: '08:00', days: [1], tone: 'cached.wav' } });
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-cache1', time: '09:00', days: [1], tone: 'missing.wav' } });
+  const sync = await dev.waitFor((m) => m.type === 'alarms_sync' && m.alarms.length === 3);
+  assert.deepEqual(sync.tones, [{ name: 'cached.wav', size: body.length, sha256: sha256(body) }],
+    'each tone once; a tone with no file is left out');
+  dev.close(); br.close();
+});
+
+test('re-uploading a tone in use sends devices a new version to download', async () => {
+  await upload('changing.wav', wav(1000));
+  const br = await browser(server);
+  const dev = await device(server, 'esp32-cache2');
+  await online(br, 'esp32-cache2');
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-cache2', time: '07:00', days: [1], tone: 'changing.wav' } });
+  const before = await dev.waitFor((m) => m.type === 'alarms_sync' && m.tones?.length === 1);
+
+  const newBody = wav(2000);
+  await upload('changing.wav', newBody);
+  const after = await dev.waitFor((m) => m.type === 'alarms_sync' && m.tones?.[0]?.sha256 === sha256(newBody));
+  assert.notEqual(after.version, before.version);
+  assert.equal(after.tones[0].size, newBody.length);
+  dev.close(); br.close();
+});

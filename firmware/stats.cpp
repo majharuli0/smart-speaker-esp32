@@ -9,6 +9,7 @@
 #include "config.h"
 #include "net.h"
 #include "timesync.h"
+#include "tonecache.h"
 #if CONFIG_IDF_TARGET_ESP32S3
 // Only on the S3: these add ~100 KB, which the original ESP32's app space can't spare
 #include <FFat.h>
@@ -77,6 +78,12 @@ static void sendStats() {
 static void fileStorageUsage(JsonObject o, const esp_partition_t *p) {
 #ifdef MEASURE_FILE_STORAGE
   bool fat = p->subtype == ESP_PARTITION_SUBTYPE_DATA_FAT;
+  if (fat && cacheReady()) {  // already mounted by the tone storage: measure, don't unmount it
+    o["used"] = FFat.usedBytes();
+    o["fsTotal"] = FFat.totalBytes();
+    o["note"] = "tone storage (FAT)";
+    return;
+  }
   if (fat && FFat.begin(false, "/ffat", 1, p->label)) {
     o["used"] = FFat.usedBytes();
     o["fsTotal"] = FFat.totalBytes();
@@ -98,6 +105,7 @@ static void fileStorageUsage(JsonObject o, const esp_partition_t *p) {
 }
 
 static void buildPartitions() {
+  partitionsJson = "";
   JsonDocument doc;
   doc["type"] = "partitions";
   doc["flashSize"] = ESP.getFlashChipSize();
@@ -148,7 +156,11 @@ void statsSetup() {
   buildPartitions();
 }
 
-void sendPartitions() { netSend(partitionsJson); }
+// Rebuilt each time (cheap, unlike the app size) so stored tones show up
+void sendPartitions() {
+  buildPartitions();
+  netSend(partitionsJson);
+}
 
 void statsLoop() {
   static unsigned long lastStats = 0;

@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.4.0"
+#define FW_VERSION "0.5.0"
 
 // ---- Server ----
 #define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
@@ -41,6 +41,14 @@
 #define RING_MAX_MS 60000     // stop ringing after 1 minute if nobody presses Stop
 #define MAX_ALARMS 20         // alarms stored on the device (saved in settings storage)
 #define TONE_TIMEOUT_MS 3000  // give up downloading a tone after this and beep instead
+
+// Tones stored on the device (in the 9.9 MB "ffat" area) so alarms play the
+// real tone offline. S3 only: the original ESP32's layout has no room for it.
+#if CONFIG_IDF_TARGET_ESP32S3
+#define TONE_CACHE 1
+#define TONE_CACHE_PARTITION "ffat"
+#define TONE_RETRY_MS 30000   // after a failed download, try again this much later
+#endif
 
 // Live voice from the browser (same 16 kHz mono format as tones)
 #define TALK_BUF_SAMPLES 4096  // 256 ms ring buffer; when full the oldest audio is dropped

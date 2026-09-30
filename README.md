@@ -22,7 +22,19 @@ node server.js
 
 If Windows Firewall asks, allow it (TCP 3000 and UDP 5353 for mDNS). Open `http://localhost:3000`.
 
-## 2. Flash the ESP32 (Arduino IDE)
+## 2. Flash the ESP32
+
+**From the command line (recommended).** All board settings and library versions come from [firmware/sketch.yaml](firmware/sketch.yaml), so there are no IDE menus to get wrong. Needs [arduino-cli](https://arduino.github.io/arduino-cli/) (`winget install ArduinoSA.CLI`).
+
+```bash
+cd firmware
+./fw.sh build                 # compile for the ESP32-S3
+./fw.sh upload COM11          # compile + upload (use your port)
+./fw.sh monitor COM11         # serial monitor at 115200, Ctrl+C to quit
+PROFILE=esp32 ./fw.sh build   # original ESP32 board instead
+```
+
+**From the Arduino IDE:**
 
 - Board: **ESP32S3 Dev Module** (esp32 core by Espressif). Board settings are under "Amp wiring" below.
 - Libraries: **WiFiManager** (tzapu), **WebSockets** (Markus Sattler), **ArduinoJson** (v7)

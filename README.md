@@ -81,19 +81,6 @@ ESP32-S3 Arduino settings: Board **ESP32S3 Dev Module**, Flash Size **16MB**, PS
 
 ## Protocol
 
-All messages are JSON over one WebSocket.
+Every message between the device, server and web page is documented in [docs/protocol.md](docs/protocol.md).
 
-| From → To | Message |
-|---|---|
-| device → server | `{type:"hello", role:"device", deviceId}` |
-| browser → server | `{type:"hello", role:"browser"}` → replies with `devices`, `alarms`, `tones` |
-| server → browsers | `{type:"devices"\|"alarms"\|"tones", ...}` whenever one changes |
-| browser → server | `{type:"alarm_save", alarm:{id?, deviceId, time:"07:00", days:[0-6], tone, tz, enabled}}`, `{type:"alarm_delete", id}` |
-| server → device | `{type:"ring", tone}` when an alarm is due |
-| server → browsers | `{type:"alarm_fired", alarmId, deviceId, time, delivered}` |
-| browser → device | any other `{type, target, ...}` relayed as-is: `blink`, `ring` (test), `stop`, `reset_wifi` |
-| browser → device | `{type:"talk_start", target}`, then **binary** PCM chunks, then `{type:"talk_stop", target}`. One talker per device; otherwise `{type:"talk_denied", reason:"busy"\|"offline"}` |
-| browser → device | `{type:"volume", target, value:0-100}` sets and saves it on the device; without `value` it only asks |
-| device → browsers | anything, relayed with `deviceId` added: `ringing`, `stopped`, `talking`, `talk_stopped`, `volume`, and every 2 s `stats` (RAM, PSRAM, app flash, settings storage, per-core CPU %, uptime, Wi-Fi signal) |
-
-Commands other than the alarm messages are relayed without the server knowing what they mean, so adding one means changing only the frontend and the sketch.
+The server passes most browser commands straight to the device without knowing what they mean, so adding a new command usually means changing only the web page and the firmware.

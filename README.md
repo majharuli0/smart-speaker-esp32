@@ -1,15 +1,16 @@
-# ESP32 LED Demo: browser → local server → device
+# ESP32 Smart Speaker
 
-Minimal starting point: the ESP32 joins Wi-Fi, finds the local server on its own, and shows up in a browser page listing every online device.
+An ESP32-S3 speaker controlled from the browser: custom alarms, hold-to-talk, volume and device health. It joins Wi-Fi, finds the local server on its own, and shows up on the web page. See [docs/ROADMAP.md](docs/ROADMAP.md) for the plan to production.
 
 ```
-led-demo/
-├── backend/server.js     Express + WebSocket relay, answers mDNS for led-server.local
-├── frontend/index.html   Device list with Blink / Reset Wi-Fi buttons
-└── esp32/esp32.ino       Wi-Fi setup, server discovery, command handling
+├── firmware/firmware.ino   ESP32 program: Wi-Fi setup, server link, audio, alarms, stats
+├── backend/server.js       Express + WebSocket relay, alarm scheduler, tones, mDNS for led-server.local
+├── web/                    Web page (index.html) and mic processor (mic-worklet.js)
+├── hardware/               Schematics and enclosure (later)
+└── docs/                   Roadmap; archive/ holds the earlier design doc
 ```
 
-The earlier sound/flash-storage version is in git history (commit `340a074`), along with `docs/audio-alarm-design.md` and `esp32/format_flash/`.
+The earlier SPI-flash sound storage and the `format_flash` sketch are in git history (commit `340a074`).
 
 ## 1. Start the server
 
@@ -23,9 +24,9 @@ If Windows Firewall asks, allow it (TCP 3000 and UDP 5353 for mDNS). Open `http:
 
 ## 2. Flash the ESP32 (Arduino IDE)
 
-- Board: **ESP32 Dev Module** (esp32 core by Espressif)
+- Board: **ESP32S3 Dev Module** (esp32 core by Espressif). Board settings are under "Amp wiring" below.
 - Libraries: **WiFiManager** (tzapu), **WebSockets** (Markus Sattler), **ArduinoJson** (v7)
-- Upload `esp32/esp32.ino`, Serial Monitor at 115200
+- Open `firmware/firmware.ino`, upload, Serial Monitor at 115200
 
 ## 3. Connect it to Wi-Fi (first boot only)
 

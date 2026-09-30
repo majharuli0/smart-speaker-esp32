@@ -23,7 +23,7 @@ app.use((req, res, next) => {
   res.set({ 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'X-Filename' });
   req.method === 'OPTIONS' ? res.end() : next();
 });
-app.use(express.static(path.join(__dirname, '../frontend')));
+app.use(express.static(path.join(__dirname, '../web')));
 app.use('/tones', express.static(TONES_DIR));
 
 // Body is a 16 kHz 16-bit mono WAV, already converted by the browser

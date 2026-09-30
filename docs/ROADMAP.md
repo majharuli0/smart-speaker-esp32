@@ -52,7 +52,7 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 **Goal:** a device that works reliably on its own, can be updated over Wi-Fi, and is set up the standard way.
 
 **Structure**
-- [ ] **1.1 Split the sketch into modules:** `audio` (player, talk, volume), `net` (Wi-Fi, cloud link), `alarms`, `provisioning`, `stats`, `ota`, `ui` (buttons, LED).
+- [x] **1.1 Split the sketch into modules:** `audio` (player, talk, volume), `net` (Wi-Fi, cloud link), `alarms`, `provisioning`, `stats`, `ota`, `ui` (buttons, LED).
 
 **Alarms that don't need the network**
 - [ ] **1.2 Time.** NTP with the user's timezone (`configTzTime`, with a POSIX timezone string from the backend), periodic resync, and a "time is valid" flag. Alarms wait until the time is known.

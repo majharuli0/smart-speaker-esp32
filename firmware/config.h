@@ -1,5 +1,6 @@
 // All the settings you might change, in one place.
 #pragma once
+#include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
 #define FW_VERSION "0.2.0"

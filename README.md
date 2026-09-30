@@ -3,7 +3,7 @@
 An ESP32-S3 speaker controlled from the browser: custom alarms, hold-to-talk, volume and device health. It joins Wi-Fi, finds the local server on its own, and shows up on the web page. See [docs/ROADMAP.md](docs/ROADMAP.md) for the plan to production.
 
 ```
-├── firmware/firmware.ino   ESP32 program: Wi-Fi setup, server link, audio, alarms, stats
+├── firmware/               ESP32 program: firmware.ino (startup + commands), net, audio, stats, config.h
 ├── backend/server.js       Express + WebSocket relay, alarm scheduler, tones, mDNS for led-server.local
 ├── web/                    Web page (index.html) and mic processor (mic-worklet.js)
 ├── hardware/               Schematics and enclosure (later)

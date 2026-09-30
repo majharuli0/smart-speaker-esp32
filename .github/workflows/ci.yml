@@ -1,0 +1,44 @@
+# Runs on every push and pull request:
+#   backend  - the 16 backend tests (npm test)
+#   firmware - compiles the sketch for both boards, using firmware/sketch.yaml
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [s3, esp32]   # profiles in firmware/sketch.yaml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      # The ESP32 core + toolchain is ~1 GB: cache it so only the first run downloads it
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino
+          key: arduino-${{ hashFiles('firmware/sketch.yaml') }}
+      - name: Compile (${{ matrix.profile }})
+        run: arduino-cli compile --profile ${{ matrix.profile }} firmware

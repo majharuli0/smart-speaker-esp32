@@ -17,10 +17,12 @@ The earlier SPI-flash sound storage and the `format_flash` sketch are in git his
 ```bash
 cd backend
 npm install
-node server.js
+npm start        # or: npm run dev  (restarts automatically when server.js changes)
 ```
 
 If Windows Firewall asks, allow it (TCP 3000 and UDP 5353 for mDNS). Open `http://localhost:3000`.
+
+Optional settings (port, data folder, mDNS name) go in `backend/.env`. Copy [backend/.env.example](backend/.env.example) to start.
 
 ## 2. Flash the ESP32
 

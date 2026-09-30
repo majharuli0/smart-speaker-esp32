@@ -5,10 +5,13 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const PORT = 3000;
-const MDNS_HOST = 'led-server.local';
-const TONES_DIR = path.join(__dirname, 'tones');
-const ALARMS_FILE = path.join(__dirname, 'alarms.json');
+// Settings come from the environment (or backend/.env, see .env.example)
+const PORT = Number(process.env.PORT) || 3000;
+const MDNS_HOST = process.env.MDNS_HOST || 'led-server.local';
+const MDNS_ENABLED = process.env.MDNS !== 'off'; // tests turn it off
+const DATA_DIR = path.resolve(__dirname, process.env.DATA_DIR || '.');
+const TONES_DIR = path.join(DATA_DIR, 'tones');
+const ALARMS_FILE = path.join(DATA_DIR, 'alarms.json');
 fs.mkdirSync(TONES_DIR, { recursive: true });
 
 // [{ id, deviceId, time: "07:00", days: [0..6, Sun=0], tone, tz, enabled }]
@@ -42,18 +45,21 @@ const server = app.listen(PORT, () => console.log(`Server on http://localhost:${
 // the ESP32 finds the server without a hardcoded address. The UDP "connect"
 // just asks the OS which interface reaches the LAN (sends nothing); pinning
 // mDNS to it keeps replies off WSL/Hyper-V virtual adapters.
-const probe = dgram.createSocket('udp4');
-probe.connect(80, '8.8.8.8', () => {
-  const ip = probe.address().address;
-  probe.close();
-  const mdns = require('multicast-dns')({ interface: ip });
-  mdns.on('query', (query) => {
-    if (query.questions.some((q) => q.name === MDNS_HOST && (q.type === 'A' || q.type === 'ANY'))) {
-      mdns.respond({ answers: [{ name: MDNS_HOST, type: 'A', ttl: 120, data: ip }] });
-    }
+function advertiseMdns() {
+  const probe = dgram.createSocket('udp4');
+  probe.connect(80, '8.8.8.8', () => {
+    const ip = probe.address().address;
+    probe.close();
+    const mdns = require('multicast-dns')({ interface: ip });
+    mdns.on('query', (query) => {
+      if (query.questions.some((q) => q.name === MDNS_HOST && (q.type === 'A' || q.type === 'ANY'))) {
+        mdns.respond({ answers: [{ name: MDNS_HOST, type: 'A', ttl: 120, data: ip }] });
+      }
+    });
+    console.log(`Advertising ${MDNS_HOST} -> ${ip}`);
   });
-  console.log(`Advertising ${MDNS_HOST} -> ${ip}`);
-});
+}
+if (MDNS_ENABLED) advertiseMdns();
 
 const wss = new WebSocketServer({ server });
 const devices = new Map(); // deviceId -> ws

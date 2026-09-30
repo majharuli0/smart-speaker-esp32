@@ -1,0 +1,42 @@
+// All the settings you might change, in one place.
+#pragma once
+
+// ---- Firmware version: bump on every release (shown on the web page) ----
+#define FW_VERSION "0.2.0"
+
+// ---- Server ----
+#define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
+#define SERVER_PORT 3000
+#define SETUP_AP_PREFIX "LED-Setup-"   // Wi-Fi setup hotspot name + last 4 chars of the device ID
+
+// ---- MAX98357A amp wiring, picked by which board you compile for ----
+#if CONFIG_IDF_TARGET_ESP32S3
+// ESP32-S3-WROOM-1 N16R8: GPIO 4/5/6 sit next to each other on the left header.
+// Avoid 35-37 (octal PSRAM), 19/20 (USB), 43/44 (serial), 0/3/45/46 (boot pins).
+#define I2S_DOUT_GPIO 4
+#define I2S_BCLK_GPIO 5
+#define I2S_LRC_GPIO  6
+#else
+// Original ESP32 (physically traced, don't re-derive from a diagram)
+#define I2S_DOUT_GPIO 33
+#define I2S_BCLK_GPIO 25
+#define I2S_LRC_GPIO  32
+#endif
+#define I2S_PORT I2S_NUM_0
+
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 2  // original ESP32 dev board's blue LED (the S3 core defines its RGB LED)
+#endif
+
+// ---- Audio ----
+#define SAMPLE_RATE 16000     // tones are converted to 16 kHz 16-bit mono WAV by the web page
+#define DEFAULT_VOLUME 70     // 0-100, used until the user changes it
+#define RING_MAX_MS 60000     // stop ringing after 1 minute if nobody presses Stop
+
+// Live voice from the browser (same 16 kHz mono format as tones)
+#define TALK_BUF_SAMPLES 4096  // 256 ms ring buffer; when full the oldest audio is dropped
+#define TALK_PREBUFFER   1600  // wait for 100 ms of audio before playing, to ride out Wi-Fi hiccups
+#define TALK_DRY_MS      150   // no audio for longer than the I2S queue holds → buffer up again
+
+// ---- Web page stats ----
+#define STATS_INTERVAL_MS 2000  // how often RAM/storage/CPU stats go to the web page

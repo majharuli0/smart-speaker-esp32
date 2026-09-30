@@ -36,8 +36,8 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 - [x] **0.1 Save the base.** Commit the current work and tag it `v0.1-demo`.
 - [x] **0.2 Repo layout.** `firmware/` (from `esp32/`), `backend/`, `web/` (from `frontend/`), `app/` (later), `hardware/` (schematics), `docs/`. Remove leftovers: `esp32/format_flash/` and `backend/claims.json`, `sounds.json`, `sounds/`. Move `docs/audio-alarm-design.md` to `docs/archive/`.
 - [x] **0.3 Reproducible firmware builds.** arduino-cli with a `sketch.yaml` profile. It pins esp32 core 3.3.12 and the library versions, and sets the board options: `FlashSize=16M`, `PSRAM=opi`, `PartitionScheme=app3M_fat9M_16MB`, `CDCOnBoot=cdc`. No more IDE menu settings to forget. Add scripts: `build`, `upload`, `monitor`.
-- [ ] **0.4 Firmware config.** A `config.h` holding the server host/port, feature switches and pins, instead of values scattered through the sketch. The server address can later come from setup and be saved on the device.
-- [ ] **0.5 Firmware version.** `FW_VERSION` sent in `hello` and shown on the device card.
+- [x] **0.4 Firmware config.** A `config.h` holding the server host/port, feature switches and pins, instead of values scattered through the sketch. The server address can later come from setup and be saved on the device.
+- [x] **0.5 Firmware version.** `FW_VERSION` sent in `hello` and shown on the device card.
 - [ ] **0.6 Backend hygiene.** `npm start` / `npm test`, config from a `.env` file (`PORT`, `DATA_DIR`), linting and formatting.
 - [ ] **0.7 Real tests.** Move the ad-hoc simulated-device tests into `backend/test/` using `node:test`. Cover the alarm scheduler (timezones, dedup, weekdays), the relay, tone upload (filename sanitizing), talk routing and volume.
 - [ ] **0.8 CI.** GitHub Actions: build the firmware for esp32s3 (and esp32), run the backend tests on every push.

@@ -135,7 +135,7 @@
       bar('Settings', n(s.nvsUsed), n(s.nvsTotal), `${n(s.nvsUsed)} of ${n(s.nvsTotal)} entries`),
       bar('CPU 0', n(s.cpu?.[0]), 100, 'Wi-Fi'),
       bar('CPU 1', n(s.cpu?.[1]), 100, `our code · ${n(s.cpuMhz)} MHz`),
-      `<div class="muted">Up ${uptime(n(s.uptime))} · Wi-Fi ${n(s.rssi)} dBm (${signal(n(s.rssi))}) · ${size(n(s.flashSize))} flash chip</div>`,
+      `<div class="muted">Firmware ${esc(s.fw || '?')} · Up ${uptime(n(s.uptime))} · Wi-Fi ${n(s.rssi)} dBm (${signal(n(s.rssi))}) · ${size(n(s.flashSize))} flash chip</div>`,
     ].join('');
   }
 

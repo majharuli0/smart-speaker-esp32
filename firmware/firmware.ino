@@ -18,36 +18,7 @@
 #define MEASURE_FILE_STORAGE 1
 #endif
 
-#define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
-#define SERVER_PORT 3000
-
-// MAX98357A amp wiring, picked by which board you compile for
-#if CONFIG_IDF_TARGET_ESP32S3
-// ESP32-S3-WROOM-1 N16R8: GPIO 4/5/6 sit next to each other on the left header.
-// Avoid 35-37 (octal PSRAM), 19/20 (USB), 43/44 (serial), 0/3/45/46 (boot pins).
-#define I2S_DOUT_GPIO 4
-#define I2S_BCLK_GPIO 5
-#define I2S_LRC_GPIO  6
-#else
-// Original ESP32 (physically traced, don't re-derive from a diagram)
-#define I2S_DOUT_GPIO 33
-#define I2S_BCLK_GPIO 25
-#define I2S_LRC_GPIO  32
-#endif
-#define I2S_PORT I2S_NUM_0
-
-#ifndef LED_BUILTIN
-#define LED_BUILTIN 2  // original ESP32 dev board's blue LED (the S3 core defines its RGB LED)
-#endif
-#define SAMPLE_RATE 16000   // tones are converted to 16 kHz 16-bit mono WAV by the web page
-#define RING_MAX_MS 60000   // stop ringing after 1 minute if nobody presses Stop
-
-// Live voice from the browser (same 16 kHz mono format as tones)
-#define TALK_BUF_SAMPLES 4096  // 256 ms ring buffer; when full the oldest audio is dropped
-#define TALK_PREBUFFER   1600  // wait for 100 ms of audio before playing, to ride out Wi-Fi hiccups
-#define TALK_DRY_MS      150   // no audio for longer than the I2S queue holds → buffer up again
-
-#define STATS_INTERVAL_MS 2000  // how often RAM/storage/CPU stats go to the web page
+#include "config.h"  // server, pins, audio and timing settings
 
 WebSocketsClient webSocket;
 WiFiManager wm;
@@ -55,7 +26,7 @@ String deviceId;
 IPAddress serverIp;
 Preferences prefs;
 
-int volume = 70;          // 0-100, saved in flash so it survives a restart
+int volume = DEFAULT_VOLUME;  // 0-100, saved in flash so it survives a restart
 int32_t volumeGain = 0;   // 0-256 multiplier applied to every sample
 
 HTTPClient http;
@@ -136,6 +107,7 @@ void sendStats() {
   doc["cpu"][1] = cpu[1];                      // core 1: this sketch
   doc["uptime"] = millis() / 1000;
   doc["rssi"] = WiFi.RSSI();
+  doc["fw"] = FW_VERSION;
 
   String out;
   serializeJson(doc, out);
@@ -356,7 +328,7 @@ void pumpTone() {
 void onWsEvent(WStype_t type, uint8_t *payload, size_t length) {
   if (type == WStype_CONNECTED) {
     Serial.println("Connected to server");
-    String hello = "{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\"}";
+    String hello = "{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\",\"fw\":\"" FW_VERSION "\"}";
     webSocket.sendTXT(hello);
     sendVolume();
     webSocket.sendTXT(partitionsJson);
@@ -390,7 +362,7 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);  // GPIO 2 on ESP32, the RGB LED (GPIO 48) on the S3
   i2sSetup();
   prefs.begin("audio");
-  setVolume(prefs.getUChar("vol", 70));
+  setVolume(prefs.getUChar("vol", DEFAULT_VOLUME));
   appUsed = ESP.getSketchSize();
   appTotal = appUsed + ESP.getFreeSketchSpace();
   buildPartitions();
@@ -402,11 +374,11 @@ void setup() {
            (uint8_t)mac, (uint8_t)(mac >> 8), (uint8_t)(mac >> 16),
            (uint8_t)(mac >> 24), (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
   deviceId = id;
-  Serial.println("Device ID: " + deviceId);
+  Serial.println("Device ID: " + deviceId + "  firmware " FW_VERSION);
 
   // No saved Wi-Fi (or it's unreachable)? Opens hotspot "LED-Setup-xxxx":
   // join it from a phone, pick your network, enter the password.
-  String apName = "LED-Setup-" + deviceId.substring(deviceId.length() - 4);
+  String apName = SETUP_AP_PREFIX + deviceId.substring(deviceId.length() - 4);
   if (!wm.autoConnect(apName.c_str())) ESP.restart();
   Serial.println("Wi-Fi connected, IP: " + WiFi.localIP().toString());
 

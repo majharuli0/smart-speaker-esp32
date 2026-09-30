@@ -1,5 +1,6 @@
 #include "timesync.h"
 #include <Preferences.h>
+#include <WiFi.h>
 #include <time.h>
 #include "config.h"
 
@@ -24,6 +25,14 @@ void setTimezone(const char *posix, const char *name) {
   setenv("TZ", posix, 1);
   tzset();
   Serial.println("Time zone set: " + tzName + " (" + tzPosix + ")");
+}
+
+void timeLoop() {
+  static unsigned long lastTry = 0;
+  if (timeValid() || WiFi.status() != WL_CONNECTED) return;
+  if (millis() - lastTry < 30000) return;
+  lastTry = millis();
+  configTzTime(tzPosix.c_str(), NTP_SERVER_1, NTP_SERVER_2);
 }
 
 bool timeValid() {

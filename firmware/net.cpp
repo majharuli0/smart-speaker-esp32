@@ -38,26 +38,52 @@ void netSetup(const NetHandlers &h) {
   makeDeviceId();
   Serial.println("Device ID: " + deviceId + "  firmware " FW_VERSION);
 
-  // No saved Wi-Fi (or it's unreachable)? Opens hotspot "LED-Setup-xxxx":
-  // join it from a phone, pick your network, enter the password.
-  String apName = SETUP_AP_PREFIX + deviceId.substring(deviceId.length() - 4);
-  if (!wm.autoConnect(apName.c_str())) ESP.restart();
-  Serial.println("Wi-Fi connected, IP: " + WiFi.localIP().toString());
-
-  WiFi.setSleep(false);  // power-save mode drops mDNS replies
-  MDNS.begin(deviceId.c_str());
-  while ((serverIp = MDNS.queryHost(SERVER_MDNS_NAME)) == IPAddress(0, 0, 0, 0)) {
-    Serial.println("Looking for " SERVER_MDNS_NAME ".local ...");
-    delay(1000);
+  WiFi.mode(WIFI_STA);
+  if (!wm.getWiFiIsSaved()) {
+    // First boot: nothing to do until Wi-Fi is set up, so wait in hotspot
+    // "LED-Setup-xxxx": join it from a phone, pick your network, enter the password.
+    String apName = SETUP_AP_PREFIX + deviceId.substring(deviceId.length() - 4);
+    if (!wm.autoConnect(apName.c_str())) ESP.restart();
+  } else {
+    // Saved Wi-Fi: connect in the background and never block. If the router is
+    // down (e.g. still booting after a power cut) the device keeps running and
+    // alarms keep ringing; the Wi-Fi driver reconnects by itself when it's back.
+    WiFi.setAutoReconnect(true);
+    WiFi.begin();
   }
-  Serial.println("Server found at " + serverIp.toString());
-
-  webSocket.begin(serverIp.toString(), SERVER_PORT, "/");
+  WiFi.setSleep(false);  // power-save mode drops mDNS replies
   webSocket.onEvent(onWsEvent);
-  webSocket.setReconnectInterval(3000);
 }
 
-void netLoop() { webSocket.loop(); }
+// Wi-Fi up → find the server by mDNS (retrying every 5 s) → keep the WebSocket open
+void netLoop() {
+  static bool wifiWasUp = false, mdnsStarted = false, wsStarted = false;
+  static unsigned long lastLookup = 0;
+
+  bool wifiUp = WiFi.status() == WL_CONNECTED;
+  if (wifiUp != wifiWasUp) {
+    wifiWasUp = wifiUp;
+    Serial.println(wifiUp ? "Wi-Fi connected, IP: " + WiFi.localIP().toString() : String("Wi-Fi lost, reconnecting..."));
+  }
+  if (!wifiUp) return;
+  if (!mdnsStarted) mdnsStarted = MDNS.begin(deviceId.c_str());
+
+  if (!wsStarted) {
+    if (lastLookup && millis() - lastLookup < 5000) return;
+    lastLookup = millis();
+    IPAddress ip = MDNS.queryHost(SERVER_MDNS_NAME, 1000);  // short timeout: audio keeps playing
+    if (ip == IPAddress(0, 0, 0, 0)) {
+      Serial.println("Looking for " SERVER_MDNS_NAME ".local ...");
+      return;
+    }
+    serverIp = ip;
+    Serial.println("Server found at " + serverIp.toString());
+    webSocket.begin(serverIp.toString(), SERVER_PORT, "/");
+    webSocket.setReconnectInterval(3000);
+    wsStarted = true;
+  }
+  webSocket.loop();
+}
 bool netConnected() { return webSocket.isConnected(); }
 IPAddress serverAddress() { return serverIp; }
 

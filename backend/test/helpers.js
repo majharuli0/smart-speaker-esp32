@@ -72,9 +72,13 @@ function connect(server, hello) {
 
 const device = (server, deviceId) => connect(server, { type: 'hello', role: 'device', deviceId, fw: 'test' });
 const browser = (server) => connect(server, { type: 'hello', role: 'browser' });
+// Every device is sent these when it connects; they aren't commands
+const ON_CONNECT = ['timezone', 'alarms_sync'];
+const commands = (dev) => dev.messages.filter((m) => !ON_CONNECT.includes(m.type));
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Resolves when a browser sees `deviceId` in its device list (the device finished registering)
 const online = (br, deviceId) => br.waitFor((m) => m.type === 'devices' && m.devices.includes(deviceId));
 
-module.exports = { startServer, connect, device, browser, sleep, online, tempDir };
+module.exports = { startServer, connect, device, browser, sleep, online, tempDir, commands };

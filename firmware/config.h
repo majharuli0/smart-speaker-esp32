@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.4.0"
 
 // ---- Server ----
 #define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
@@ -39,6 +39,8 @@
 #define SAMPLE_RATE 16000     // tones are converted to 16 kHz 16-bit mono WAV by the web page
 #define DEFAULT_VOLUME 70     // 0-100, used until the user changes it
 #define RING_MAX_MS 60000     // stop ringing after 1 minute if nobody presses Stop
+#define MAX_ALARMS 20         // alarms stored on the device (saved in settings storage)
+#define TONE_TIMEOUT_MS 3000  // give up downloading a tone after this and beep instead
 
 // Live voice from the browser (same 16 kHz mono format as tones)
 #define TALK_BUF_SAMPLES 4096  // 256 ms ring buffer; when full the oldest audio is dropped

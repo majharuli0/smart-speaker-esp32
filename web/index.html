@@ -53,7 +53,7 @@
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MAX_TONE_SECONDS = 30;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {} };
+  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {}, alarmVersions: {}, acked: {} };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
   const uidOf = (id) => id.replace('esp32-', '').toUpperCase(); // display only; commands use id
@@ -64,7 +64,7 @@
   const send = (msg) => ws.send(JSON.stringify(msg));
 
   ws.onopen = () => {
-    $('status').textContent = `connected · times are in ${tz}`;
+    $('status').textContent = "connected · alarm times are in each device's own time zone (see its clock)";
     send({ type: 'hello', role: 'browser' });
   };
   ws.onclose = () => { $('status').textContent = 'disconnected (reload the page)'; };
@@ -73,6 +73,7 @@
     const msg = JSON.parse(e.data);
     if (['devices', 'alarms', 'tones'].includes(msg.type)) {
       state[msg.type] = msg[msg.type];
+      if (msg.type === 'alarms') state.alarmVersions = msg.versions || {};
       render();
       // Each device reports its own volume (it's stored on the device)
       // (and its flash layout, measured once when it boots)
@@ -100,8 +101,10 @@
     } else if (msg.type === 'talk_denied') {
       stopTalk();
       alert(msg.reason === 'busy' ? 'Someone else is already talking to this device.' : 'Device is offline.');
-    } else if (msg.type === 'alarm_fired' && !msg.delivered) {
-      $('notice').textContent = `Missed ${msg.time} alarm: ${uidOf(msg.deviceId)} was offline.`;
+    } else if (msg.type === 'alarms_ack') {
+      state.acked[msg.deviceId] = msg;
+      const el = document.getElementById(`sync-${msg.deviceId}`);
+      if (el) el.innerHTML = syncHtml(msg.deviceId);
     }
   };
 
@@ -176,6 +179,16 @@
       </table>`;
   }
 
+  // Has the device confirmed (alarms_ack) the latest alarm list the server sent it?
+  function syncHtml(id) {
+    const ack = state.acked[id];
+    const expected = state.alarmVersions[id];
+    if (!ack) return 'waiting for the device to confirm its alarms…';
+    const current = expected ? ack.version === expected : ack.count === 0;
+    const n = Number(ack.count) || 0;
+    return current ? `✓ ${n} alarm${n === 1 ? '' : 's'} saved on the device (rings even without internet)` : '⏳ sending alarms to the device…';
+  }
+
   function render() {
     $('tones').innerHTML = state.tones
       .map((t) => `<li><a href="http://${serverHost}/tones/${esc(t)}" target="_blank">${esc(t)}</a></li>`)
@@ -210,6 +223,7 @@
               <button data-cmd="delete">Delete</button>
             </li>`).join('')}
           </ul>
+          <div class="muted" id="sync-${esc(id)}">${syncHtml(id)}</div>
           <div class="row add">
             <input type="time"> ${dayBoxes}
             <select>${toneOptions}</select>
@@ -241,7 +255,7 @@
       const time = add.querySelector('[type=time]').value;
       const days = [...add.querySelectorAll('[type=checkbox]:checked')].map((c) => Number(c.value));
       if (!time || !days.length || !tone) return alert('Pick a time, at least one day, and a tone.');
-      send({ type: 'alarm_save', alarm: { deviceId: id, time, days, tone, tz } });
+      send({ type: 'alarm_save', alarm: { deviceId: id, time, days, tone } });
     }
   });
 

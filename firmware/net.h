@@ -12,7 +12,9 @@ struct NetHandlers {
   void (*binary)(uint8_t *data, size_t length); // talk audio
 };
 
-void netSetup(const NetHandlers &handlers);  // blocks until Wi-Fi is up and the server is found
+// Only blocks on first boot (no Wi-Fi saved yet: runs the setup hotspot).
+// Otherwise returns at once; netLoop() connects and reconnects in the background.
+void netSetup(const NetHandlers &handlers);
 void netLoop();
 bool netConnected();
 void netSend(const String &json);

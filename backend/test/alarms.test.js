@@ -1,44 +1,29 @@
-// Alarm saving, validation, persistence and the 1 s scheduler
+// Alarms: saving and validation, persistence, and syncing each device its own
+// list. Alarms ring on the device itself, so the server must never ring them.
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { startServer, device, browser, online, sleep, tempDir } = require('./helpers');
-
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const TZ = 'Asia/Tokyo'; // deliberately not the machine's timezone
-
-// Current HH:MM and weekday in a timezone, the same way the server computes them
-function nowIn(tz) {
-  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hourCycle: 'h23', hour: '2-digit', minute: '2-digit', weekday: 'short',
-  }).formatToParts(new Date()).map((x) => [x.type, x.value]));
-  return { time: `${p.hour}:${p.minute}`, weekday: DAYS.indexOf(p.weekday) };
-}
-
-// Don't start a timed test in the last seconds of a minute: the alarm minute could pass
-async function awayFromMinuteEdge() {
-  const s = new Date().getSeconds();
-  if (s >= 55) await sleep((61 - s) * 1000);
-}
 
 let server;
 before(async () => { server = await startServer(); });
 after(() => server.stop());
 
 const latestAlarms = (br) => [...br.messages].reverse().find((m) => m.type === 'alarms').alarms;
+const syncs = (dev) => dev.messages.filter((m) => m.type === 'alarms_sync');
+const clear = async (br) => { for (const a of latestAlarms(br)) br.sendJson({ type: 'alarm_delete', id: a.id }); await sleep(100); };
 
 test('valid alarms are saved and broadcast; invalid ones are ignored', async () => {
   const br = await browser(server);
   await br.waitFor((m) => m.type === 'alarms');
-  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a1', time: 'bad', days: [1], tone: 'x.wav', tz: TZ } });
-  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a1', time: '07:00', days: [1, 2], tone: '../../evil.wav', tz: 'Not/AZone' } });
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a1', time: 'bad', days: [1], tone: 'x.wav' } });
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a1', time: '07:00', days: [1, 2, 9], tone: '../../evil.wav' } });
   const msg = await br.waitFor((m) => m.type === 'alarms' && m.alarms.length === 1);
   const a = msg.alarms[0];
   assert.equal(a.time, '07:00');
+  assert.deepEqual(a.days, [1, 2], 'day 9 is not a weekday');
   assert.equal(a.tone, 'evil.wav', 'tone path is stripped to a file name');
-  assert.equal(a.tz, 'UTC', 'unknown timezone falls back to UTC');
   assert.equal(a.enabled, true);
-  br.sendJson({ type: 'alarm_delete', id: a.id });
-  await br.waitFor((m) => m.type === 'alarms' && m.alarms.length === 0);
+  await clear(br);
   br.close();
 });
 
@@ -46,7 +31,7 @@ test('alarms survive a server restart', async () => {
   const dir = tempDir();
   const s1 = await startServer(dir);
   const br1 = await browser(s1);
-  br1.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a2', time: '06:30', days: [0], tone: 't.wav', tz: TZ } });
+  br1.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a2', time: '06:30', days: [0], tone: 't.wav' } });
   await br1.waitFor((m) => m.type === 'alarms' && m.alarms.length === 1);
   br1.close();
   await s1.stop();
@@ -60,39 +45,85 @@ test('alarms survive a server restart', async () => {
   await s2.stop();
 });
 
-test('scheduler rings the right alarm once, in the alarm timezone', async () => {
-  await awayFromMinuteEdge();
+test('a device gets only its own alarms, on connect and after each change', async () => {
   const br = await browser(server);
+  await br.waitFor((m) => m.type === 'alarms');
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a3', time: '07:00', days: [1], tone: 'mine.wav' } });
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-other', time: '08:00', days: [1], tone: 'theirs.wav' } });
+  await br.waitFor((m) => m.type === 'alarms' && m.alarms.length === 2);
+
   const dev = await device(server, 'esp32-a3');
-  await online(br, 'esp32-a3');
+  const first = await dev.waitFor((m) => m.type === 'alarms_sync');
+  assert.equal(first.alarms.length, 1);
+  assert.deepEqual(Object.keys(first.alarms[0]).sort(), ['days', 'enabled', 'id', 'time', 'tone']);
+  assert.equal(first.alarms[0].tone, 'mine.wav');
 
-  const now = nowIn(TZ);
-  const other = (now.weekday + 1) % 7;
-  const base = { deviceId: 'esp32-a3', time: now.time, tz: TZ };
-  br.sendJson({ type: 'alarm_save', alarm: { ...base, days: [now.weekday], tone: 'ring.wav' } });
-  br.sendJson({ type: 'alarm_save', alarm: { ...base, days: [other], tone: 'wrong-day.wav' } });
-  br.sendJson({ type: 'alarm_save', alarm: { ...base, days: [now.weekday], tone: 'disabled.wav', enabled: false } });
+  // Change it: a new sync with a new version
+  br.sendJson({ type: 'alarm_save', alarm: { ...first.alarms[0], deviceId: 'esp32-a3', time: '07:30' } });
+  const second = await dev.waitFor((m) => m.type === 'alarms_sync' && m.alarms[0]?.time === '07:30');
+  assert.notEqual(second.version, first.version);
 
-  const ring = await dev.waitFor((m) => m.type === 'ring', 3000);
-  assert.equal(ring.tone, 'ring.wav');
-  const fired = await br.waitFor((m) => m.type === 'alarm_fired');
-  assert.equal(fired.delivered, true);
+  // Delete it: an empty list
+  br.sendJson({ type: 'alarm_delete', id: first.alarms[0].id });
+  const third = await dev.waitFor((m) => m.type === 'alarms_sync' && m.alarms.length === 0);
+  assert.notEqual(third.version, second.version);
 
-  await sleep(2500); // several more scheduler ticks within the same minute
-  const rings = dev.messages.filter((m) => m.type === 'ring');
-  assert.deepEqual(rings.map((r) => r.tone), ['ring.wav'], 'fires once; wrong-day and disabled never');
-
-  for (const a of latestAlarms(br)) br.sendJson({ type: 'alarm_delete', id: a.id });
+  await clear(br);
   dev.close(); br.close();
 });
 
-test('an alarm for an offline device is reported as not delivered', async () => {
-  await awayFromMinuteEdge();
+test('the version stays the same when the list has not changed', async () => {
   const br = await browser(server);
-  const now = nowIn(TZ);
-  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-offline', time: now.time, days: [now.weekday], tone: 'x.wav', tz: TZ } });
-  const fired = await br.waitFor((m) => m.type === 'alarm_fired' && m.deviceId === 'esp32-offline', 3000);
-  assert.equal(fired.delivered, false);
-  for (const a of latestAlarms(br)) br.sendJson({ type: 'alarm_delete', id: a.id });
-  br.close();
+  await br.waitFor((m) => m.type === 'alarms');
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a4', time: '05:00', days: [2], tone: 'x.wav' } });
+  await br.waitFor((m) => m.type === 'alarms' && m.alarms.some((a) => a.deviceId === 'esp32-a4'));
+
+  const d1 = await device(server, 'esp32-a4');
+  const v1 = (await d1.waitFor((m) => m.type === 'alarms_sync')).version;
+  d1.close();
+  const d2 = await device(server, 'esp32-a4');
+  const v2 = (await d2.waitFor((m) => m.type === 'alarms_sync')).version;
+  assert.equal(v2, v1, 'reconnecting device can skip re-saving an identical list');
+
+  await clear(br);
+  d2.close(); br.close();
+});
+
+test('the server never rings alarms itself (the device does)', async () => {
+  const br = await browser(server);
+  const dev = await device(server, 'esp32-a5');
+  await online(br, 'esp32-a5');
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a5', time: hhmm, days: [now.getDay()], tone: 'x.wav' } });
+  await dev.waitFor((m) => m.type === 'alarms_sync' && m.alarms.length === 1);
+  await sleep(2500);
+  assert.equal(dev.messages.filter((m) => m.type === 'ring').length, 0);
+  await clear(br);
+  dev.close(); br.close();
+});
+
+test("the device's acknowledgement and alarm_fired reach the page", async () => {
+  const br = await browser(server);
+  const dev = await device(server, 'esp32-a6');
+  await online(br, 'esp32-a6');
+  dev.sendJson({ type: 'alarms_ack', version: 'abc12345', count: 2 });
+  dev.sendJson({ type: 'alarm_fired', alarmId: 'x', time: '07:00' });
+  const ack = await br.waitFor((m) => m.type === 'alarms_ack');
+  assert.deepEqual([ack.deviceId, ack.count], ['esp32-a6', 2]);
+  const fired = await br.waitFor((m) => m.type === 'alarm_fired');
+  assert.equal(fired.deviceId, 'esp32-a6');
+  dev.close(); br.close();
+});
+
+test('the page is told the same version the device receives', async () => {
+  const br = await browser(server);
+  const dev = await device(server, 'esp32-a7');
+  await online(br, 'esp32-a7');
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a7', time: '09:15', days: [3], tone: 'x.wav' } });
+  const sync = await dev.waitFor((m) => m.type === 'alarms_sync' && m.alarms.length === 1);
+  const page = await br.waitFor((m) => m.type === 'alarms' && m.versions?.['esp32-a7'] === sync.version);
+  assert.ok(page, 'alarms message carries the version the device will confirm with alarms_ack');
+  await clear(br);
+  dev.close(); br.close();
 });

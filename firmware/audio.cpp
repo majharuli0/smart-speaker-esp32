@@ -12,7 +12,10 @@ static int32_t volumeGain = 0;  // 0-256 multiplier applied to every sample
 
 static HTTPClient http;
 static WiFiClient *toneStream = nullptr;
-static String ringingTone;  // empty = not ringing
+static bool ringing = false;
+static String ringingTone;
+static bool beeping = false;  // built-in beep instead of the tone
+static uint32_t beepSample = 0;
 static int32_t toneBytesLeft = 0;
 static unsigned long ringStart = 0;
 
@@ -90,6 +93,9 @@ void audioSetup() {
 static bool openTone() {
   http.end();
   toneBytesLeft = 0;
+  if (ringingTone.isEmpty()) return false;
+  http.setConnectTimeout(TONE_TIMEOUT_MS);  // don't hang when offline: beep instead
+  http.setTimeout(TONE_TIMEOUT_MS);
   http.begin("http://" + serverAddress().toString() + ":" + String(SERVER_PORT) + "/tones/" + ringingTone);
   if (http.GET() != HTTP_CODE_OK) return false;
   toneStream = http.getStreamPtr();
@@ -99,8 +105,28 @@ static bool openTone() {
   return toneBytesLeft > 0;
 }
 
+// The tone can't be downloaded (no network, server down, file missing):
+// ring with a built-in beep rather than stay silent
+static void startBeep() {
+  http.end();
+  beeping = true;
+  beepSample = 0;
+  Serial.println("Tone unavailable, beeping instead");
+}
+
+// 880 Hz beep: 0.25 s on, 0.25 s off
+static void pumpBeep() {
+  int16_t mono[256];
+  for (int i = 0; i < 256; i++, beepSample++) {
+    bool on = (beepSample % (SAMPLE_RATE / 2)) < SAMPLE_RATE / 4;
+    mono[i] = on ? (int16_t)(12000 * sinf(2 * PI * 880 * beepSample / SAMPLE_RATE)) : 0;
+  }
+  playSamples(mono, 256);
+}
+
 void toneStop() {
-  if (ringingTone.isEmpty()) return;
+  if (!ringing) return;
+  ringing = beeping = false;
   http.end();
   ringingTone = "";
   i2s_zero_dma_buffer(I2S_PORT);
@@ -111,26 +137,28 @@ void toneStop() {
 void toneStart(const String &tone) {
   talkStop();  // an alarm wins over live talk
   toneStop();
+  ringing = true;
   ringingTone = tone;
   ringStart = millis();
   Serial.println("Ringing: " + tone);
-  if (openTone()) netSend("{\"type\":\"ringing\"}");
-  else toneStop();
+  if (!openTone()) startBeep();
+  netSend("{\"type\":\"ringing\"}");
 }
 
 // One small chunk per call so the WebSocket keeps being serviced and
 // "stop" works mid-ring. Loops the tone until stopped or RING_MAX_MS.
 static void pumpTone() {
-  if (ringingTone.isEmpty()) return;
+  if (!ringing) return;
   if (millis() - ringStart > RING_MAX_MS) return toneStop();
+  if (beeping) return pumpBeep();
   if (toneBytesLeft < 2) {  // end of file: play it again
-    if (!openTone()) toneStop();
+    if (!openTone()) startBeep();
     return;
   }
 
   size_t avail = toneStream->available();
   if (avail < 2) {
-    if (!http.connected()) toneStop();  // server went away mid-stream
+    if (!http.connected()) startBeep();  // network or server went away mid-stream
     return;
   }
 

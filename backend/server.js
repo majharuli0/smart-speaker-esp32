@@ -17,7 +17,7 @@ const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
 const DEFAULT_TZ = process.env.TZ_DEFAULT || Intl.DateTimeFormat().resolvedOptions().timeZone;
 fs.mkdirSync(TONES_DIR, { recursive: true });
 
-// [{ id, deviceId, time: "07:00", days: [0..6, Sun=0], tone, tz, enabled }]
+// [{ id, deviceId, time: "07:00" (device's local time), days: [0..6, Sun=0], tone, enabled }]
 let alarms = [];
 try { alarms = JSON.parse(fs.readFileSync(ALARMS_FILE, 'utf8')); } catch {}
 const saveAlarms = () => fs.writeFileSync(ALARMS_FILE, JSON.stringify(alarms, null, 2));
@@ -117,46 +117,49 @@ function sendTimezone(deviceId) {
 // Hourly re-send keeps devices right across daylight-saving switches
 setInterval(() => devices.forEach((_, id) => sendTimezone(id)), 60 * 60 * 1000);
 
-// Current date, HH:MM and weekday in the alarm's own timezone, so a server
-// running on UTC (e.g. in the cloud) still rings at the user's local time.
-function nowIn(tz) {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat('en-US', {
-      timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', weekday: 'short',
-    }).formatToParts(new Date()).map((x) => [x.type, x.value])
-  );
-  return {
-    time: `${p.hour}:${p.minute}`,
-    weekday: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday),
-    minuteKey: `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`,
-  };
+// Alarms ring on the device, from its own clock and time zone (so they work
+// with the network down). The server only keeps the list and sends each
+// device its own alarms: on connect and after every change. The version is a
+// hash of the content, so an unchanged list is recognised and not re-saved.
+function alarmsFor(deviceId) {
+  const list = alarms
+    .filter((a) => a.deviceId === deviceId)
+    .map(({ id, time, days, tone, enabled }) => ({ id, time, days, tone, enabled }));
+  const version = crypto.createHash('sha1').update(JSON.stringify(list)).digest('hex').slice(0, 8);
+  return { list, version };
 }
 
-const lastFired = {}; // alarmId -> minuteKey, so each alarm fires once per matching minute
-setInterval(() => {
-  for (const a of alarms) {
-    if (!a.enabled) continue;
-    const now = nowIn(a.tz);
-    if (now.time !== a.time || !a.days.includes(now.weekday) || lastFired[a.id] === now.minuteKey) continue;
-    lastFired[a.id] = now.minuteKey;
-    const delivered = toDevice(a.deviceId, { type: 'ring', tone: a.tone });
-    console.log(`Alarm ${a.time} -> ${a.deviceId}: ${delivered ? 'ringing' : 'device offline'}`);
-    toBrowsers({ type: 'alarm_fired', alarmId: a.id, deviceId: a.deviceId, time: a.time, delivered });
-  }
-}, 1000);
+function syncAlarms(deviceId) {
+  const { list, version } = alarmsFor(deviceId);
+  toDevice(deviceId, { type: 'alarms_sync', version, alarms: list });
+}
+
+// All alarms for the page, plus the version each device should confirm with alarms_ack
+function alarmsMessage() {
+  const ids = new Set([...devices.keys(), ...alarms.map((a) => a.deviceId)]);
+  const versions = Object.fromEntries([...ids].map((id) => [id, alarmsFor(id).version]));
+  return { type: 'alarms', alarms, versions };
+}
 
 function saveAlarm(a) {
   if (!/^\d\d:\d\d$/.test(a.time) || !Array.isArray(a.days) || !a.deviceId || !a.tone) return;
-  let tz = a.tz;
-  try { nowIn(tz); } catch { tz = 'UTC'; } // unknown timezone name
   const alarm = {
     id: a.id || crypto.randomUUID(), deviceId: a.deviceId, time: a.time,
-    days: a.days.map(Number), tone: path.basename(a.tone), tz, enabled: a.enabled !== false,
+    days: a.days.map(Number).filter((d) => d >= 0 && d <= 6), tone: path.basename(a.tone), enabled: a.enabled !== false,
   };
   alarms = alarms.filter((x) => x.id !== alarm.id).concat(alarm);
   saveAlarms();
-  toBrowsers({ type: 'alarms', alarms });
+  toBrowsers(alarmsMessage());
+  syncAlarms(alarm.deviceId);
+}
+
+function deleteAlarm(id) {
+  const gone = alarms.find((a) => a.id === id);
+  if (!gone) return;
+  alarms = alarms.filter((a) => a.id !== id);
+  saveAlarms();
+  toBrowsers(alarmsMessage());
+  syncAlarms(gone.deviceId);
 }
 
 wss.on('connection', (ws) => {
@@ -180,20 +183,17 @@ wss.on('connection', (ws) => {
         console.log(`Device online: ${ws.deviceId}`);
         toBrowsers(deviceList());
         sendTimezone(ws.deviceId);
+        syncAlarms(ws.deviceId);
       } else {
         ws.send(JSON.stringify(deviceList()));
-        ws.send(JSON.stringify({ type: 'alarms', alarms }));
+        ws.send(JSON.stringify(alarmsMessage()));
         ws.send(JSON.stringify({ type: 'tones', tones: listTones() }));
       }
       return;
     }
 
     if (ws.role === 'browser' && msg.type === 'alarm_save') return saveAlarm(msg.alarm || {});
-    if (ws.role === 'browser' && msg.type === 'alarm_delete') {
-      alarms = alarms.filter((a) => a.id !== msg.id);
-      saveAlarms();
-      return toBrowsers({ type: 'alarms', alarms });
-    }
+    if (ws.role === 'browser' && msg.type === 'alarm_delete') return deleteAlarm(msg.id);
 
     if (ws.role === 'browser' && msg.type === 'set_timezone') {
       if (!msg.target || !isValidTz(msg.tz)) return;

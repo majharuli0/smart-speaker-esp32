@@ -1,7 +1,7 @@
 // Hold-to-talk: routing of binary voice chunks, one talker per device
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { startServer, device, browser, online, sleep } = require('./helpers');
+const { startServer, device, browser, online, sleep, commands } = require('./helpers');
 
 let server;
 before(async () => { server = await startServer(); });
@@ -27,7 +27,7 @@ test('voice chunks go only to the talk target, only between start and stop', asy
   await sleep(150);
 
   assert.equal(binaries(a), 2);
-  assert.equal(b.messages.filter((m) => m.type !== 'timezone').length, 0, 'the other device got nothing');
+  assert.equal(commands(b).length, 0, 'the other device got nothing');
   a.close(); b.close(); br.close();
 });
 

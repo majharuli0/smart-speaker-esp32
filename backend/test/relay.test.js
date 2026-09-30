@@ -1,7 +1,7 @@
 // Device list and message relay between browsers and devices
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { startServer, device, browser, online, sleep } = require('./helpers');
+const { startServer, device, browser, online, sleep, commands } = require('./helpers');
 
 let server;
 before(async () => { server = await startServer(); });
@@ -36,8 +36,7 @@ test('browser commands reach only the target device', async () => {
   await a.waitFor((m) => m.type === 'volume' && m.value === 35);
   assert.ok(a.messages.some((m) => m.type === 'blink'));
   await sleep(100);
-  // (every device also gets its time zone on connect; that's not a command)
-  assert.equal(b.messages.filter((m) => m.type !== 'timezone').length, 0, 'the other device got no commands');
+  assert.equal(commands(b).length, 0, 'the other device got no commands');
   a.close(); b.close(); br.close();
 });
 

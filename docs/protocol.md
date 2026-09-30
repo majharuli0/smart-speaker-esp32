@@ -2,7 +2,7 @@
 
 How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.3.0` and backend `0.2.0`.
+**Version:** matches firmware `0.4.0` and backend `0.2.0`.
 
 ---
 
@@ -48,9 +48,8 @@ If a device reconnects before its old connection closes, the new connection repl
 | Message | When |
 |---|---|
 | `{type:"devices", devices:[deviceId, ...]}` | On browser hello, and whenever a device comes online or goes offline |
-| `{type:"alarms", alarms:[Alarm, ...]}` | On browser hello, and after any alarm change (all alarms, for all devices) |
+| `{type:"alarms", alarms:[Alarm, ...], versions:{deviceId: version}}` | On browser hello, and after any alarm change. All alarms for all devices, plus the version each device should confirm (see 5). |
 | `{type:"tones", tones:["name.wav", ...]}` | On browser hello, and after an upload |
-| `{type:"alarm_fired", alarmId, deviceId, time, delivered}` | When an alarm is due. `delivered:false` means the device was offline (a missed alarm). |
 | `{type:"talk_denied", deviceId, reason:"busy"\|"offline"}` | Only to the browser whose `talk_start` was refused |
 
 ### 3.3 Browser → server (handled by the server, not relayed)
@@ -83,14 +82,16 @@ The server forwards any other browser message to the device named in `target`. I
 | Message | When |
 |---|---|
 | `{type:"timezone", tz, name}` | On connect, then every hour. `tz` is the POSIX rule the ESP32 uses, `name` the IANA zone. See section 8. |
-| `{type:"ring", tone}` | An alarm for this device is due |
+| `{type:"alarms_sync", version, alarms:[{id, time, days, tone, enabled}]}` | On connect, and after any change to this device's alarms. Only its own alarms. |
 | `{type:"talk_stop"}` | The browser that was talking closed its tab or lost its connection |
 
 ### 3.6 Device → browsers (relayed to all browsers, with `deviceId` added)
 
 | Message | When |
 |---|---|
-| `{type:"ringing"}` / `{type:"stopped"}` | A tone starts / stops (Stop pressed, 60 s limit reached, or the download failed) |
+| `{type:"ringing"}` / `{type:"stopped"}` | A tone (or the built-in beep) starts / stops: Stop pressed, or the 60 s limit reached |
+| `{type:"alarms_ack", version, count}` | After every `alarms_sync`: the list is saved on the device |
+| `{type:"alarm_fired", alarmId, time}` | The device rang an alarm from its own clock |
 | `{type:"talking"}` / `{type:"talk_stopped"}` | Talk playback starts / ends |
 | `{type:"volume", value}` | On connect, and after any `volume` request |
 | `{type:"stats", ...}` | Every 2 s while connected. See 6.1. |
@@ -110,31 +111,43 @@ browser: talk_start → binary chunk, chunk, ... → talk_stop
   - Holds a 4,096-sample buffer (256 ms). It starts playing once 100 ms are buffered, and drops the oldest audio when the buffer is full.
   - If no audio arrives for 150 ms, it waits for 100 ms of audio to build up again before resuming.
   - On `talk_stop` it plays what's left in the buffer, then stops.
-- **Priority:** a `ring` (alarm or test) stops talk.
+- **Priority:** an alarm, or a `ring` from the **Test tone** button, stops talk.
 - The mic only works on `https://` or `http://localhost`, a browser rule.
 
 ---
 
 ## 5. Alarms
 
+Alarms **ring on the device**, from its own clock and time zone, so they work with the network or server down. The server only keeps the list and delivers it.
+
 ```json
 { "id": "uuid", "deviceId": "esp32-…", "time": "07:00", "days": [1,2,3,4,5],
-  "tone": "wake.wav", "tz": "Asia/Dhaka", "enabled": true }
+  "tone": "wake.wav", "enabled": true }
 ```
 
 | Field | Rule |
 |---|---|
 | `id` | Created by the server when missing |
-| `time` | `HH:MM`, 24-hour, **in `tz`**; must match `^\d\d:\d\d$` |
-| `days` | Weekdays, `0` = Sunday … `6` = Saturday |
+| `time` | `HH:MM`, 24-hour, in the **device's** time zone (section 8); must match `^dd:dd$` |
+| `days` | Weekdays, `0` = Sunday … `6` = Saturday; other numbers are dropped |
 | `tone` | A file in the tone library. Only the file name is kept (paths are stripped). |
-| `tz` | IANA time zone name from the browser. An unknown name becomes `UTC`. |
 | `enabled` | Defaults to `true` |
 
-- **Scheduler:** every 1 s, each enabled alarm is checked against the current time **in its own `tz`**. It fires **once per matching minute**: it sends `ring` to the device and `alarm_fired` to browsers.
-- **Missed alarms:** an alarm is not fired later if the server was down, or if the device was offline at that minute (`delivered:false`).
-- **Storage:** `backend/alarms.json` (or `DATA_DIR`). It survives restarts.
-- **Ringing on the device:** streams the tone over HTTP and loops it until `stop`, or for **60 s** at most. Each loop downloads the file again.
+**Delivery:**
+```
+page: alarm_save / alarm_delete → server saves alarms.json
+server → device: alarms_sync {version, alarms}      (on connect + after each change)
+device: saves the list in flash → alarms_ack {version, count}
+```
+- **`version`** is a hash of the device's list. An unchanged list keeps its version, so the device doesn't re-save it on every reconnect. The page compares `alarms_ack.version` with `alarms.versions[deviceId]` to show "saved on the device".
+- **Storage:** server in `backend/alarms.json` (or `DATA_DIR`); device in its settings storage, up to 20 alarms. Both survive restarts.
+
+**Ringing (on the device):**
+- It checks the list once per minute, right as the minute starts, **only after its clock is set** (`timeValid`). So an alarm never rings at a wrong time, and never twice in the same minute.
+- If several alarms are due in the same minute, the first one wins.
+- It streams the tone over HTTP and loops it until `stop`, or for **60 s** at most. Each loop downloads the file again.
+- If the tone **can't be downloaded** (no network, server down, file missing, or 3 s timeout), it plays a **built-in beep** (880 Hz, 0.25 s on / off) instead of staying silent.
+- **After a restart with no internet,** the clock can't be set (no battery-backed clock yet), so alarms wait until the internet is back.
 
 ---
 

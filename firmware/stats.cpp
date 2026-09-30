@@ -8,6 +8,7 @@
 #include <esp_ota_ops.h>
 #include "config.h"
 #include "net.h"
+#include "timesync.h"
 #if CONFIG_IDF_TARGET_ESP32S3
 // Only on the S3: these add ~100 KB, which the original ESP32's app space can't spare
 #include <FFat.h>
@@ -62,6 +63,8 @@ static void sendStats() {
   doc["uptime"] = millis() / 1000;
   doc["rssi"] = WiFi.RSSI();
   doc["fw"] = FW_VERSION;
+  doc["time"] = timeNow();                  // local time, "" until NTP has synced
+  doc["tz"] = timezoneName();
 
   String out;
   serializeJson(doc, out);

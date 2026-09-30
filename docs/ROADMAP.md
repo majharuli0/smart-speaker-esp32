@@ -55,7 +55,7 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 - [x] **1.1 Split the sketch into modules:** `audio` (player, talk, volume), `net` (Wi-Fi, cloud link), `alarms`, `provisioning`, `stats`, `ota`, `ui` (buttons, LED).
 
 **Alarms that don't need the network**
-- [ ] **1.2 Time.** NTP with the user's timezone (`configTzTime`, with a POSIX timezone string from the backend), periodic resync, and a "time is valid" flag. Alarms wait until the time is known.
+- [x] **1.2 Time.** NTP with the user's timezone (`configTzTime`, with a POSIX timezone string from the backend), periodic resync, and a "time is valid" flag. Alarms wait until the time is known.
 - [ ] **1.3 Alarms on the device.** Stored in flash. The server pushes the full alarm list with a version number and the device acknowledges it. The device checks every second and rings with no network. Includes snooze (9 min default), a volume fade-in, a maximum ring time, and one-time plus repeating alarms.
 - [ ] **1.4 Tone cache (9.9 MB `ffat`).** Format on first boot. Download the tones the alarms use, named by content hash and checked with SHA-256, written to a temp file and then renamed. Delete the least recently used tones when full. Fall back to a built-in tone if a file is missing.
 - [ ] **1.5 Built-in sounds.** Ding-dong and beep generated in code, no files needed, so they always work.

@@ -135,6 +135,9 @@
       bar('Settings', n(s.nvsUsed), n(s.nvsTotal), `${n(s.nvsUsed)} of ${n(s.nvsTotal)} entries`),
       bar('CPU 0', n(s.cpu?.[0]), 100, 'Wi-Fi'),
       bar('CPU 1', n(s.cpu?.[1]), 100, `our code · ${n(s.cpuMhz)} MHz`),
+      `<div>🕒 ${s.time ? esc(s.time) : '<span class="muted">clock not set yet (waiting for internet time)</span>'}
+        <span class="muted">${esc(s.tz || '')}</span>
+        ${s.tz && s.tz !== tz ? `· <a href="#" data-cmd="settz">Use my time zone (${esc(tz)})</a>` : ''}</div>`,
       `<div class="muted">Firmware ${esc(s.fw || '?')} · Up ${uptime(n(s.uptime))} · Wi-Fi ${n(s.rssi)} dBm (${signal(n(s.rssi))}) · ${size(n(s.flashSize))} flash chip</div>`,
     ].join('');
   }
@@ -225,6 +228,7 @@
     const tone = add.querySelector('select').value;
     const alarm = state.alarms.find((a) => a.id === e.target.closest('[data-alarm]')?.dataset.alarm);
 
+    if (cmd === 'settz') { e.preventDefault(); send({ type: 'set_timezone', target: id, tz }); }
     if (cmd === 'blink') send({ type: 'blink', target: id });
     if (cmd === 'test') tone ? send({ type: 'ring', target: id, tone }) : alert('Upload a tone first');
     if (cmd === 'stop') send({ type: 'stop', target: id });

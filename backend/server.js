@@ -12,6 +12,9 @@ const MDNS_ENABLED = process.env.MDNS !== 'off'; // tests turn it off
 const DATA_DIR = path.resolve(__dirname, process.env.DATA_DIR || '.');
 const TONES_DIR = path.join(DATA_DIR, 'tones');
 const ALARMS_FILE = path.join(DATA_DIR, 'alarms.json');
+const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
+// Time zone for devices that haven't been given one: this machine's (right for a local server)
+const DEFAULT_TZ = process.env.TZ_DEFAULT || Intl.DateTimeFormat().resolvedOptions().timeZone;
 fs.mkdirSync(TONES_DIR, { recursive: true });
 
 // [{ id, deviceId, time: "07:00", days: [0..6, Sun=0], tone, tz, enabled }]
@@ -19,6 +22,29 @@ let alarms = [];
 try { alarms = JSON.parse(fs.readFileSync(ALARMS_FILE, 'utf8')); } catch {}
 const saveAlarms = () => fs.writeFileSync(ALARMS_FILE, JSON.stringify(alarms, null, 2));
 const listTones = () => fs.readdirSync(TONES_DIR).filter((f) => f.endsWith('.wav'));
+
+// Per-device settings: { [deviceId]: { tz: "Asia/Dhaka" } }
+let deviceSettings = {};
+try { deviceSettings = JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf8')); } catch {}
+const saveDeviceSettings = () => fs.writeFileSync(DEVICES_FILE, JSON.stringify(deviceSettings, null, 2));
+
+const isValidTz = (tz) => {
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
+};
+
+// IANA name → the POSIX rule the ESP32 understands, using the zone's offset
+// right now: Asia/Dhaka → "<+06>-6", Asia/Kolkata → "<+0530>-5:30", UTC → "UTC0".
+// POSIX counts hours WEST of UTC, so the sign flips. Daylight-saving rules
+// aren't encoded; the server re-sends every hour, which covers the switch.
+function posixTz(tz) {
+  const offset = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
+    .formatToParts(new Date()).find((p) => p.type === 'timeZoneName').value; // "GMT+06:00", or "GMT"
+  const m = offset.match(/GMT([+-])(\d\d):(\d\d)/);
+  if (!m || (m[2] === '00' && m[3] === '00')) return 'UTC0'; // UTC shows as "GMT+00:00"
+  const [, sign, hh, mm] = m;
+  const minutes = mm === '00' ? '' : mm;
+  return `<${sign}${hh}${minutes}>${sign === '+' ? '-' : ''}${Number(hh)}${minutes ? ':' + minutes : ''}`;
+}
 
 const app = express();
 // Allow the page to be opened from a file or Live Server, not only from this server
@@ -84,6 +110,13 @@ function toDevice(deviceId, msg) {
 
 const deviceList = () => ({ type: 'devices', devices: [...devices.keys()] });
 
+function sendTimezone(deviceId) {
+  const tz = deviceSettings[deviceId]?.tz || DEFAULT_TZ;
+  toDevice(deviceId, { type: 'timezone', tz: posixTz(tz), name: tz });
+}
+// Hourly re-send keeps devices right across daylight-saving switches
+setInterval(() => devices.forEach((_, id) => sendTimezone(id)), 60 * 60 * 1000);
+
 // Current date, HH:MM and weekday in the alarm's own timezone, so a server
 // running on UTC (e.g. in the cloud) still rings at the user's local time.
 function nowIn(tz) {
@@ -146,6 +179,7 @@ wss.on('connection', (ws) => {
         devices.set(ws.deviceId, ws);
         console.log(`Device online: ${ws.deviceId}`);
         toBrowsers(deviceList());
+        sendTimezone(ws.deviceId);
       } else {
         ws.send(JSON.stringify(deviceList()));
         ws.send(JSON.stringify({ type: 'alarms', alarms }));
@@ -159,6 +193,13 @@ wss.on('connection', (ws) => {
       alarms = alarms.filter((a) => a.id !== msg.id);
       saveAlarms();
       return toBrowsers({ type: 'alarms', alarms });
+    }
+
+    if (ws.role === 'browser' && msg.type === 'set_timezone') {
+      if (!msg.target || !isValidTz(msg.tz)) return;
+      deviceSettings[msg.target] = { ...deviceSettings[msg.target], tz: msg.tz };
+      saveDeviceSettings();
+      return sendTimezone(msg.target);
     }
 
     // One talker per device; binary chunks follow until talk_stop

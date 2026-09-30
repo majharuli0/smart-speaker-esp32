@@ -14,10 +14,10 @@ function tempDir() {
 
 // Resolves once the server prints its port. MDNS=off so tests never answer
 // the real ESP32's lookups; PORT=0 so they never clash with a server on 3000.
-function startServer(dataDir = tempDir()) {
+function startServer(dataDir = tempDir(), env = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(process.execPath, [SERVER], {
-      env: { ...process.env, PORT: '0', MDNS: 'off', DATA_DIR: dataDir },
+      env: { ...process.env, PORT: '0', MDNS: 'off', DATA_DIR: dataDir, ...env },
     });
     let out = '';
     proc.stdout.on('data', (chunk) => {

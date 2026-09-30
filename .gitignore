@@ -3,6 +3,7 @@ node_modules
 # Runtime data the server creates locally: alarms and uploaded tones
 backend/alarms.json
 backend/tones/
+backend/devices.json
 
 # Local backend settings (copy from backend/.env.example)
 backend/.env

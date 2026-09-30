@@ -3,12 +3,18 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.2.0"
+#define FW_VERSION "0.3.0"
 
 // ---- Server ----
 #define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
 #define SERVER_PORT 3000
 #define SETUP_AP_PREFIX "LED-Setup-"   // Wi-Fi setup hotspot name + last 4 chars of the device ID
+
+// ---- Time ----
+#define NTP_SERVER_1 "pool.ntp.org"
+#define NTP_SERVER_2 "time.google.com"
+#define DEFAULT_TZ_POSIX "UTC0"  // until the server sends the real zone
+#define DEFAULT_TZ_NAME  "UTC"
 
 // ---- MAX98357A amp wiring, picked by which board you compile for ----
 #if CONFIG_IDF_TARGET_ESP32S3

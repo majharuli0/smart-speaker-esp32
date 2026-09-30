@@ -27,7 +27,7 @@ test('voice chunks go only to the talk target, only between start and stop', asy
   await sleep(150);
 
   assert.equal(binaries(a), 2);
-  assert.equal(b.messages.length, 0);
+  assert.equal(b.messages.filter((m) => m.type !== 'timezone').length, 0, 'the other device got nothing');
   a.close(); b.close(); br.close();
 });
 

@@ -2,7 +2,7 @@
 
 How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.2.0` and backend `0.2.0`.
+**Version:** matches firmware `0.3.0` and backend `0.2.0`.
 
 ---
 
@@ -61,6 +61,7 @@ If a device reconnects before its old connection closes, the new connection repl
 | `{type:"alarm_delete", id}` | Delete the alarm |
 | `{type:"talk_start", target}` | Starts a talk session if nobody else is talking to `target` and it's online. Otherwise replies with `talk_denied`. On success it's also relayed to the device. |
 | `{type:"talk_stop", target}` | Ends the session; also relayed to the device |
+| `{type:"set_timezone", target, tz}` | Saves an IANA zone name (e.g. `Asia/Dhaka`) for that device and sends it a `timezone`. Unknown names are ignored. |
 
 ### 3.4 Browser → device (relayed as-is to `target`)
 
@@ -81,6 +82,7 @@ The server forwards any other browser message to the device named in `target`. I
 
 | Message | When |
 |---|---|
+| `{type:"timezone", tz, name}` | On connect, then every hour. `tz` is the POSIX rule the ESP32 uses, `name` the IANA zone. See section 8. |
 | `{type:"ring", tone}` | An alarm for this device is due |
 | `{type:"talk_stop"}` | The browser that was talking closed its tab or lost its connection |
 
@@ -154,6 +156,8 @@ browser: talk_start → binary chunk, chunk, ... → talk_stop
 | `uptime` | Seconds since boot |
 | `rssi` | Wi-Fi signal in dBm |
 | `fw` | Firmware version |
+| `time` | Device's local time `YYYY-MM-DD HH:MM:SS`, or `""` until the first internet time sync |
+| `tz` | Device's time zone name |
 
 ### 6.2 `partitions`
 
@@ -177,3 +181,13 @@ browser: talk_start → binary chunk, chunk, ... → talk_stop
   - On success, all browsers get a `tones` message.
 - **Format:** the page converts every upload to **16 kHz, 16-bit, mono WAV with a 44-byte header**, first 30 s only. The device skips exactly 44 bytes, so other WAV layouts will play as noise.
 - **Download:** `GET /tones/<name>.wav` includes `Content-Length`. The device uses it to know where the file ends.
+
+---
+
+## 8. Time
+
+- **Clock:** the device gets the time from NTP (`pool.ntp.org`, `time.google.com`) after Wi-Fi connects, and ESP-IDF resyncs it every hour. Until the first sync, `time` in `stats` is empty and the clock must not be trusted.
+- **Time zone:** the server keeps one IANA zone per device in `devices.json` (in `DATA_DIR`). If none is set, it uses `TZ_DEFAULT`, or the server machine's own zone.
+- **POSIX rule:** the ESP32 needs the zone as a POSIX rule, built from the zone's current UTC offset. POSIX counts hours *west* of UTC, so the sign flips: `Asia/Dhaka` → `<+06>-6`, `Asia/Kolkata` → `<+0530>-5:30`, `America/Argentina/Buenos_Aires` → `<-03>3`, UTC → `UTC0`.
+- **Daylight saving:** the rule has no DST dates in it. The server re-sends every hour, so a device is at most an hour late switching, and only if it's online.
+- The device saves the last zone it received, so it keeps the right local time after a restart even before the server connects.

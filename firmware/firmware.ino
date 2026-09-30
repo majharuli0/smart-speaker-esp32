@@ -3,12 +3,14 @@
 //   net    - device ID, Wi-Fi setup, finding the server, WebSocket
 //   audio  - speaker, volume, ringing tones, live talk
 //   stats  - RAM/CPU/Wi-Fi stats and the flash layout for the web page
+//   timesync - real time from NTP, in the device's time zone
 // Messages are documented in docs/protocol.md.
 #include <ArduinoJson.h>
 #include "config.h"
 #include "net.h"
 #include "audio.h"
 #include "stats.h"
+#include "timesync.h"
 
 static void blink() {
   digitalWrite(LED_BUILTIN, HIGH);
@@ -38,6 +40,7 @@ static void onCommand(uint8_t *payload, size_t length) {
     sendVolume();
   }
   else if (cmd == "partitions") sendPartitions();
+  else if (cmd == "timezone") setTimezone(doc["tz"] | "", doc["name"] | "");
   else if (cmd == "reset_wifi") resetWifi();
 }
 
@@ -49,6 +52,7 @@ void setup() {
   audioSetup();
   statsSetup();
   netSetup({onConnected, onCommand, onAudio});
+  timeSetup();
 }
 
 void loop() {

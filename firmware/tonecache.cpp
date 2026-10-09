@@ -167,8 +167,87 @@ static bool startNextDownload() {
 
 // ---- The card ----
 
+static String cardProblem;  // why the card didn't mount, shown on the page
+
+// The card didn't mount: talk to it directly (no file system) with the very
+// first SD command, CMD0 "go idle", to tell "nothing answers" from "answers
+// but won't mount".
+static String probeCard() {
+  SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+  pinMode(SD_CS_GPIO, OUTPUT);
+  digitalWrite(SD_CS_GPIO, HIGH);
+  for (int i = 0; i < 10; i++) SPI.transfer(0xFF);  // 80 clocks with CS high wake the card up
+  digitalWrite(SD_CS_GPIO, LOW);
+  const uint8_t cmd0[] = {0x40, 0, 0, 0, 0, 0x95};
+  for (uint8_t b : cmd0) SPI.transfer(b);
+  uint8_t reply = 0xFF;
+  for (int i = 0; i < 10 && reply == 0xFF; i++) reply = SPI.transfer(0xFF);
+  digitalWrite(SD_CS_GPIO, HIGH);
+  SPI.transfer(0xFF);
+  SPI.endTransaction();
+
+  if (reply == 0x01) return "the card answers, but won't mount: format it as FAT32 (not exFAT), or try another card";
+  if (reply == 0xFF) return "no answer from the card: check the header is soldered, the CS/MOSI/SCK/MISO wires (10/11/12/13) and 3V3 power";
+  if (reply == 0x00) return "MISO line stuck low: check the MISO wire (GPIO 13)";
+  char buf[90];
+  snprintf(buf, sizeof(buf), "unexpected reply 0x%02X from the card: check the wiring and contacts", reply);
+  return buf;
+}
+
+// Diagnostic for "no answer": try the CMD0 reset with the four signal wires in
+// every order on GPIOs 10-13. A reply means the wires are just in a different
+// order (and says which); none means power or contact. Once per boot.
+static String findWiring() {
+  const int pins[4] = {10, 11, 12, 13};
+  String found;
+  for (int cs = 0; cs < 4 && !found.length(); cs++)
+    for (int mosi = 0; mosi < 4 && !found.length(); mosi++)
+      for (int sck = 0; sck < 4 && !found.length(); sck++)
+        for (int miso = 0; miso < 4 && !found.length(); miso++) {
+          if (cs == mosi || cs == sck || cs == miso || mosi == sck || mosi == miso || sck == miso) continue;
+          SPI.end();
+          SPI.begin(pins[sck], pins[miso], pins[mosi], pins[cs]);
+          pinMode(pins[cs], OUTPUT);
+          digitalWrite(pins[cs], HIGH);
+          SPI.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+          for (int i = 0; i < 10; i++) SPI.transfer(0xFF);
+          digitalWrite(pins[cs], LOW);
+          const uint8_t cmd0[] = {0x40, 0, 0, 0, 0, 0x95};
+          for (uint8_t b : cmd0) SPI.transfer(b);
+          uint8_t reply = 0xFF;
+          for (int i = 0; i < 10 && reply == 0xFF; i++) reply = SPI.transfer(0xFF);
+          digitalWrite(pins[cs], HIGH);
+          SPI.endTransaction();
+          if (reply == 0x01) {
+            char buf[120];
+            snprintf(buf, sizeof(buf), " Found it: the card answers with CS=%d MOSI=%d SCK=%d MISO=%d, so the wires are in a different order.",
+                     pins[cs], pins[mosi], pins[sck], pins[miso]);
+            found = buf;
+          }
+        }
+  SPI.end();
+  SPI.begin(SD_SCK_GPIO, SD_MISO_GPIO, SD_MOSI_GPIO, SD_CS_GPIO);  // back to the configured pins
+  return found.length() ? found : String(" No wire order works either, so it's power or contact, not the order.");
+}
+
 static void mountCard() {
-  if (!SD.begin(SD_CS_GPIO, SPI, SD_SPI_HZ, "/sd", 2)) return;
+  if (!SD.begin(SD_CS_GPIO, SPI, SD_SPI_HZ, "/sd", 2)) {
+    SD.end();
+    String problem = probeCard();
+    static bool searched = false;
+    static String wiringNote;  // the search runs once; its result stays with every later report
+    if (problem.startsWith("no answer")) {
+      if (!searched) { searched = true; wiringNote = findWiring(); }
+      problem += wiringNote;
+    }
+    if (problem != cardProblem) {  // say it once, and tell the page
+      cardProblem = problem;
+      Serial.println("SD card: " + problem);
+      sendPartitions();
+    }
+    return;
+  }
+  cardProblem = "";
   stores[CARD].ready = true;
   static const char *types[] = {"none", "MMC", "SD", "SDHC/SDXC", "unknown"};
   uint8_t type = SD.cardType();
@@ -223,12 +302,7 @@ void cacheSetup() {
 
   SPI.begin(SD_SCK_GPIO, SD_MISO_GPIO, SD_MOSI_GPIO, SD_CS_GPIO);
   mountCard();
-  if (!stores[CARD].ready) {
-    Serial.println("No SD card found (checking again every few seconds). If one is inserted, check:");
-    Serial.println("  - wiring: CS=10 MOSI=11 SCK=12 MISO=13 (MOSI/MISO swapped is the usual mistake)");
-    Serial.println("  - power: a module with a regulator chip (AMS1117) needs 5V, not 3V3");
-    Serial.println("  - format: FAT32 (cards over 32 GB often come as exFAT)");
-  }
+  if (!stores[CARD].ready) Serial.println("No SD card mounted (checking again every few seconds)");
   lastCardCheck = millis();
 }
 
@@ -297,7 +371,10 @@ bool cacheReady() { return stores[BUILTIN].ready; }
 
 void cardInfo(JsonObject o) {
   o["present"] = stores[CARD].ready;
-  if (!stores[CARD].ready) return;
+  if (!stores[CARD].ready) {
+    if (cardProblem.length()) o["problem"] = cardProblem;
+    return;
+  }
   static const char *types[] = {"none", "MMC", "SD", "SDHC/SDXC", "unknown"};
   o["type"] = types[min((int)SD.cardType(), 4)];
   o["size"] = SD.cardSize();

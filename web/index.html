@@ -205,7 +205,7 @@
   // The microSD card, reported with the flash layout
   function sdHtml(sd) {
     if (!sd) return '';
-    if (!sd.present) return '<div class="muted" style="margin-top:0.5rem"><b>SD card:</b> none inserted</div>';
+    if (!sd.present) return `<div class="muted" style="margin-top:0.5rem"><b>SD card:</b> ${sd.problem ? '⚠ ' + esc(sd.problem) : 'none inserted'}</div>`;
     const n = (v) => Number(v) || 0;
     const total = n(sd.total), used = n(sd.used);
     return `<div style="margin-top:0.5rem"><b>SD card ${size(n(sd.size))}</b> <span class="muted">${esc(sd.type)}</span>

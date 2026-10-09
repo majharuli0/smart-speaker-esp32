@@ -57,6 +57,7 @@ static void onAudio(uint8_t *payload, size_t length) { talkPush(payload, length)
 
 void setup() {
   Serial.begin(115200);
+  Serial.setDebugOutput(true);  // ESP32 core error messages to this (USB) port too
   otaSetup();
   pinMode(LED_BUILTIN, OUTPUT);  // the board's RGB LED (GPIO 48)
   audioSetup();

@@ -2,7 +2,7 @@
 
 How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.7.0` and backend `0.2.0`.
+**Version:** matches firmware `0.7.4` and backend `0.2.0`.
 
 ---
 
@@ -197,7 +197,7 @@ device: saves the list in flash → alarms_ack {version, count}
               "used": 1334751, "note": "running program" }, … ] }
 ```
 - `kind`: `app` | `nvs` | `files` | `system` | `other`.
-- `sd`: `{present}`, plus `{type, size, total, used}` (bytes) when a microSD card is in. Sent again when a card is inserted or removed.
+- `sd`: `{present}`, plus `{type, size, total, used}` (bytes) when a microSD card is in, or `problem` (why it didn't mount) when it isn't. Sent again when a card is inserted or removed. To find the problem, the device sends the card the SD reset command (CMD0) directly: no reply means power or contact (it also tries every order of the four signal wires to rule out swapped wires); a reply means the card is fine but won't mount (format).
 - `used` is only present when measured: the running app, NVS, and a formatted file storage (which also has `fsTotal`).
 - The page adds a `bootloader` row for the space before the first partition.
 

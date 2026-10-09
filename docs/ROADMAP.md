@@ -59,6 +59,12 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 - [x] **1.3 Alarms on the device.** The server sends each device its own list (`alarms_sync`, versioned by content hash); the device saves it in flash, confirms with `alarms_ack`, and rings from its own clock once the time is valid. If the tone can't be downloaded it plays a built-in beep. Network start no longer blocks, so a device that restarts while the router is down keeps running and reconnects by itself.
 - [ ] **1.3b Alarm extras.** Snooze (9 min default, from a button or the page), volume fade-in, one-time alarms. After 1.6, since snooze needs the button.
 - [x] **1.4 Tone cache (9.9 MB `ffat`).** Formatted on first boot. The alarm sync lists the tones the alarms use (size + SHA-256); the device downloads missing ones in the background to a temp file, checks size and SHA-256, renames it to its hash name, and deletes tones no alarm uses. Alarms play the stored copy (offline, gapless loop), then streaming, then the beep.
+- [ ] **1.4b External microSD card.** SPI module on GPIO 10 (CS), 11 (MOSI), 12 (SCK), 13 (MISO); card formatted FAT32. Gigabytes instead of 9.9 MB, for whole songs and, later, the recorded/labelled audio library (Phase 4).
+  - **Mount at boot**, and notice when the card is **inserted or removed** while running (re-check every few seconds).
+  - **Tone storage uses the card when present**, with the built-in 9.9 MB `ffat` as the fallback. Same download, SHA-256 check and clean-up as 1.4.
+  - **Alarms never depend on the card:** if it's missing or unreadable at ring time, play from `ffat`, then streaming, then the beep.
+  - **Page:** an "SD card" row in the storage table (size, used, card type), "no card" when empty.
+  - **Done when:** an alarm plays its tone from the card offline; pulling the card out mid-ring falls back without a crash; re-inserting it is picked up without a restart.
 - [ ] **1.5 Built-in sounds.** Ding-dong and beep generated in code, no files needed, so they always work.
 
 **Physical interface**

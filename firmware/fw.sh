@@ -4,7 +4,6 @@
 #   ./fw.sh build              compile for the ESP32-S3 (file for web updates: build/s3/firmware.ino.bin)
 #   ./fw.sh upload COM11       compile and upload
 #   ./fw.sh monitor COM11      open the serial monitor (Ctrl+C to quit)
-#   PROFILE=esp32 ./fw.sh build   original ESP32 board instead
 set -e
 cd "$(dirname "$0")"
 

@@ -10,12 +10,8 @@
 #include "net.h"
 #include "timesync.h"
 #include "tonecache.h"
-#if CONFIG_IDF_TARGET_ESP32S3
-// Only on the S3: these add ~100 KB, which the original ESP32's app space can't spare
 #include <FFat.h>
 #include <LittleFS.h>
-#define MEASURE_FILE_STORAGE 1
-#endif
 
 // Measured once at boot: ESP.getSketchSize() re-checksums the whole program
 // in flash (~1 MB) on every call, which froze audio when it ran every 2 s.
@@ -77,7 +73,6 @@ static void sendStats() {
 
 // Mount a file-storage partition read-only for a moment to see how full it is
 static void fileStorageUsage(JsonObject o, const esp_partition_t *p) {
-#ifdef MEASURE_FILE_STORAGE
   bool fat = p->subtype == ESP_PARTITION_SUBTYPE_DATA_FAT;
   if (fat && cacheReady()) {  // already mounted by the tone storage: measure, don't unmount it
     o["used"] = FFat.usedBytes();
@@ -100,9 +95,6 @@ static void fileStorageUsage(JsonObject o, const esp_partition_t *p) {
     return;
   }
   o["note"] = "file storage (empty, not formatted yet)";
-#else
-  o["note"] = "file storage (usage not measured on this board)";
-#endif
 }
 
 static void buildPartitions() {

@@ -98,7 +98,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"alarms_ack", version, count}` | After every `alarms_sync`: the list is saved on the device |
 | `{type:"alarm_fired", alarmId, time}` | The device rang an alarm from its own clock |
 | `{type:"ota", state, progress?, error?, version}` | Update progress: `downloading` (0–100, every 10%), `restarting`, then from the new version `done`, or `failed`. `rolled_back` means the new version failed to start and the device went back to `version`. |
-| `{type:"cache", stored, wanted}` | How many of its alarms' tones are stored on the device. After each sync and each finished download. S3 only. |
+| `{type:"cache", stored, wanted}` | How many of its alarms' tones are stored on the device. After each sync and each finished download. |
 | `{type:"talking"}` / `{type:"talk_stopped"}` | Talk playback starts / ends |
 | `{type:"volume", value}` | On connect, and after any `volume` request |
 | `{type:"stats", ...}` | Every 2 s while connected. See 6.1. |
@@ -154,7 +154,7 @@ device: saves the list in flash → alarms_ack {version, count}
 - If several alarms are due in the same minute, the first one wins.
 - It plays the tone **from its own storage** if stored, looping with no gap. Otherwise it streams it over HTTP, downloading it again on each loop. Either way it rings until `stop`, or for **60 s** at most.
 - If the tone **can't be downloaded** (no network, server down, file missing, or 3 s timeout), it plays a **built-in beep** (880 Hz, 0.25 s on / off) instead of staying silent.
-- **Stored tones (S3 only):** `tones` in `alarms_sync` lists every tone the device's alarms use. The device:
+- **Stored tones:** `tones` in `alarms_sync` lists every tone the device's alarms use. The device:
   - downloads missing ones in the background, one small piece per loop, so audio and commands keep working;
   - writes each to a temporary file, checks size and **SHA-256**, then renames it to `/<first 8 hex of sha256>.wav`;
   - deletes stored tones no alarm uses any more;
@@ -238,4 +238,4 @@ device: saves the list in flash → alarms_ack {version, count}
   ```
   Audio stops during the update. The device does nothing else for the few seconds it takes.
 - **Rollback:** the new version starts **on probation**. It becomes permanent once it connects to the server (`ota` `done`). If it doesn't within **3 minutes**, or it crashes and restarts, the bootloader starts the previous version, which reports `rolled_back` once on its next connect.
-- **Not yet:** signed firmware. It needs secure boot, which comes with the factory setup (roadmap 5.4). The old ESP32 board's "Huge APP" layout has no spare slot, so updates over Wi-Fi fail there with an error. Use USB for it.
+- **Not yet:** signed firmware. It needs secure boot, which comes with the factory setup (roadmap 5.4).

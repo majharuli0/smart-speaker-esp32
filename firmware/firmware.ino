@@ -5,7 +5,7 @@
 //   stats  - RAM/CPU/Wi-Fi stats and the flash layout for the web page
 //   timesync - real time from NTP, in the device's time zone
 //   alarms - alarms stored on the device, rung from its own clock
-//   tonecache - the tones those alarms use, stored on the device (S3)
+//   tonecache - the tones those alarms use, stored on the device
 //   ota    - firmware updates over Wi-Fi, with automatic rollback
 // Messages are documented in docs/protocol.md.
 #include <ArduinoJson.h>
@@ -58,7 +58,7 @@ static void onAudio(uint8_t *payload, size_t length) { talkPush(payload, length)
 void setup() {
   Serial.begin(115200);
   otaSetup();
-  pinMode(LED_BUILTIN, OUTPUT);  // GPIO 2 on ESP32, the RGB LED (GPIO 48) on the S3
+  pinMode(LED_BUILTIN, OUTPUT);  // the board's RGB LED (GPIO 48)
   audioSetup();
   cacheSetup();  // before statsSetup, which measures the storage it mounts
   statsSetup();

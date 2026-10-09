@@ -1,6 +1,6 @@
 # Runs on every push and pull request:
-#   backend  - the 16 backend tests (npm test)
-#   firmware - compiles the sketch for both boards, using firmware/sketch.yaml
+#   backend  - the backend tests (npm test)
+#   firmware - compiles the ESP32-S3 firmware, using firmware/sketch.yaml
 name: CI
 
 on:
@@ -26,10 +26,6 @@ jobs:
 
   firmware:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        profile: [s3, esp32]   # profiles in firmware/sketch.yaml
     steps:
       - uses: actions/checkout@v4
       - uses: arduino/setup-arduino-cli@v2
@@ -40,5 +36,5 @@ jobs:
             ~/.arduino15
             ~/Arduino
           key: arduino-${{ hashFiles('firmware/sketch.yaml') }}
-      - name: Compile (${{ matrix.profile }})
-        run: arduino-cli compile --profile ${{ matrix.profile }} firmware
+      - name: Compile (ESP32-S3)
+        run: arduino-cli compile --profile s3 firmware

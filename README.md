@@ -33,7 +33,6 @@ cd firmware
 ./fw.sh build                 # compile for the ESP32-S3
 ./fw.sh upload COM11          # compile + upload (use your port)
 ./fw.sh monitor COM11         # serial monitor at 115200, Ctrl+C to quit
-PROFILE=esp32 ./fw.sh build   # original ESP32 board instead
 ```
 
 **Over Wi-Fi (once a board runs firmware 0.6.0 or later):** run `./fw.sh build`, upload `firmware/build/s3/firmware.ino.bin` in the page's **Firmware** section, then press **Update** on the device. If the new version can't reach the server within 3 minutes, the device goes back to the previous one by itself.
@@ -69,17 +68,19 @@ Press and hold **Hold to talk** on a device card and speak. Your voice plays on 
 - **Priority:** an alarm going off interrupts talk.
 - **Browser:** use Chrome or Edge. Firefox can't capture the mic into a 16 kHz audio context.
 
-Amp wiring (MAX98357A). The sketch picks the pins from the board you compile for:
+Board: **ESP32-S3-WROOM-1 N16R8** (16 MB flash, 8 MB PSRAM). The firmware only builds for this board.
 
-| Amp pin | ESP32-S3-WROOM-1 N16R8 | Original ESP32 |
-|---|---|---|
-| DIN | GPIO 4 | GPIO 33 |
-| BCLK | GPIO 5 | GPIO 25 |
-| LRC | GPIO 6 | GPIO 32 |
-| VIN | 5V | 5V |
-| GND | GND | GND |
+Amp wiring (MAX98357A; GAIN and SD unconnected):
 
-ESP32-S3 Arduino settings: Board **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM **OPI PSRAM**, Partition Scheme **16M Flash (3MB APP/9.9MB FATFS)**, upload through the USB-C port labelled **COM**.
+| Amp pin | ESP32-S3 |
+|---|---|
+| DIN | GPIO 4 |
+| BCLK | GPIO 5 |
+| LRC | GPIO 6 |
+| VIN | 5V |
+| GND | GND |
+
+Arduino IDE settings (`./fw.sh` sets these for you): Board **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM **OPI PSRAM**, Partition Scheme **16M Flash (3MB APP/9.9MB FATFS)**, upload through the USB-C port labelled **COM**.
 
 ## Protocol
 

@@ -1,7 +1,7 @@
 // Tones stored on the device, so alarms play the real tone with no network.
 // The server lists the tones the device's alarms use (with size + SHA-256);
 // this module downloads missing ones in the background, checks them, and
-// deletes ones no alarm uses any more. S3 only (TONE_CACHE in config.h).
+// deletes ones no alarm uses any more.
 #pragma once
 #include <Arduino.h>
 #include <ArduinoJson.h>

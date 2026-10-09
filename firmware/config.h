@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.6.0"
+#define FW_VERSION "0.6.1"
 
 // ---- Server ----
 #define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
@@ -16,24 +16,18 @@
 #define DEFAULT_TZ_POSIX "UTC0"  // until the server sends the real zone
 #define DEFAULT_TZ_NAME  "UTC"
 
-// ---- MAX98357A amp wiring, picked by which board you compile for ----
-#if CONFIG_IDF_TARGET_ESP32S3
-// ESP32-S3-WROOM-1 N16R8: GPIO 4/5/6 sit next to each other on the left header.
+// ---- Board: ESP32-S3-WROOM-1 N16R8 (16 MB flash, 8 MB PSRAM) only ----
+#if !CONFIG_IDF_TARGET_ESP32S3
+#error "This firmware is for the ESP32-S3 (N16R8). Build with ./fw.sh, which selects it."
+#endif
+
+// MAX98357A amp: GPIO 4/5/6 sit next to each other on the left header.
 // Avoid 35-37 (octal PSRAM), 19/20 (USB), 43/44 (serial), 0/3/45/46 (boot pins).
 #define I2S_DOUT_GPIO 4
 #define I2S_BCLK_GPIO 5
 #define I2S_LRC_GPIO  6
-#else
-// Original ESP32 (physically traced, don't re-derive from a diagram)
-#define I2S_DOUT_GPIO 33
-#define I2S_BCLK_GPIO 25
-#define I2S_LRC_GPIO  32
-#endif
 #define I2S_PORT I2S_NUM_0
-
-#ifndef LED_BUILTIN
-#define LED_BUILTIN 2  // original ESP32 dev board's blue LED (the S3 core defines its RGB LED)
-#endif
+// LED_BUILTIN is the board's RGB LED (GPIO 48), defined by the S3 core
 
 // ---- Audio ----
 #define SAMPLE_RATE 16000     // tones are converted to 16 kHz 16-bit mono WAV by the web page
@@ -42,13 +36,9 @@
 #define MAX_ALARMS 20         // alarms stored on the device (saved in settings storage)
 #define TONE_TIMEOUT_MS 3000  // give up downloading a tone after this and beep instead
 
-// Tones stored on the device (in the 9.9 MB "ffat" area) so alarms play the
-// real tone offline. S3 only: the original ESP32's layout has no room for it.
-#if CONFIG_IDF_TARGET_ESP32S3
-#define TONE_CACHE 1
+// Tones stored on the device (in the 9.9 MB "ffat" area) so alarms play the real tone offline
 #define TONE_CACHE_PARTITION "ffat"
 #define TONE_RETRY_MS 30000   // after a failed download, try again this much later
-#endif
 
 // Live voice from the browser (same 16 kHz mono format as tones)
 #define TALK_BUF_SAMPLES 4096  // 256 ms ring buffer; when full the oldest audio is dropped

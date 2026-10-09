@@ -3,7 +3,6 @@
 #include "net.h"
 #include "stats.h"
 
-#ifdef TONE_CACHE
 #include <FFat.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -197,13 +196,3 @@ void sendCacheStatus() {
   netSend("{\"type\":\"cache\",\"stored\":" + String(stored) + ",\"wanted\":" + String(wantedCount) + "}");
 }
 
-#else  // no tone storage on this board: tones always stream from the server
-
-void cacheSetup() {}
-void cacheSync(JsonVariantConst) {}
-void cacheLoop() {}
-String cachedPath(const String &) { return ""; }
-bool cacheReady() { return false; }
-void sendCacheStatus() {}
-
-#endif

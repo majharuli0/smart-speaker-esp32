@@ -36,6 +36,8 @@ cd firmware
 PROFILE=esp32 ./fw.sh build   # original ESP32 board instead
 ```
 
+**Over Wi-Fi (once a board runs firmware 0.6.0 or later):** run `./fw.sh build`, upload `firmware/build/s3/firmware.ino.bin` in the page's **Firmware** section, then press **Update** on the device. If the new version can't reach the server within 3 minutes, the device goes back to the previous one by itself.
+
 **From the Arduino IDE:**
 
 - Board: **ESP32S3 Dev Module** (esp32 core by Espressif). Board settings are under "Amp wiring" below.

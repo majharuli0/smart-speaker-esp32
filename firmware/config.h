@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.5.0"
+#define FW_VERSION "0.6.0"
 
 // ---- Server ----
 #define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
@@ -54,6 +54,9 @@
 #define TALK_BUF_SAMPLES 4096  // 256 ms ring buffer; when full the oldest audio is dropped
 #define TALK_PREBUFFER   1600  // wait for 100 ms of audio before playing, to ride out Wi-Fi hiccups
 #define TALK_DRY_MS      150   // no audio for longer than the I2S queue holds → buffer up again
+
+// ---- Updates over Wi-Fi ----
+#define OTA_CONFIRM_MS 180000  // a new version must reach the server within 3 min of boot, or it's rolled back
 
 // ---- Web page stats ----
 #define STATS_INTERVAL_MS 2000  // how often RAM/storage/CPU stats go to the web page

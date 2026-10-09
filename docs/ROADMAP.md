@@ -62,14 +62,14 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 - [ ] **1.5 Built-in sounds.** Ding-dong and beep generated in code, no files needed, so they always work.
 
 **Physical interface**
-- [ ] **1.6 Buttons and LED.** Buttons (e.g. GPIO 7, 15, 16): press for stop/snooze, a doorbell button, and a 10 s hold for factory reset. Onboard RGB LED (GPIO 48) states: setup, connecting, online, ringing, error.
+- [ ] **1.6 Buttons and LED.** Buttons (e.g. GPIO 7, 15, 16): press for stop/snooze, a doorbell button, and a 10 s hold for factory reset. Onboard RGB LED (GPIO 48) states: setup, connecting, online, ringing, error. *(Skipped for now: no buttons fitted yet.)*
 
 **Setup and security**
 - [ ] **1.7 Bluetooth setup (Wi-Fi provisioning).** Espressif's Bluetooth provisioning (`WiFiProv` / `network_provisioning`) with a security code (proof of possession) printed in the QR label. Keep the hotspot as a fallback.
 - [ ] **1.8 Link device to account (claim).** After Wi-Fi setup, the device sends a one-time claim token, and the backend links it to the user who scanned it.
 - [ ] **1.9 Encrypted connections.** WSS/MQTTS verified with the built-in certificate bundle (`esp_crt_bundle`). Connect to a DNS hostname in production; mDNS for development only.
 - [ ] **1.10 MQTT client** (if chosen). `esp-mqtt` with topics `devices/{id}/cmd`, `/state`, `/events` and a last-will message for offline status.
-- [ ] **1.11 Updates over Wi-Fi (OTA).** `esp_https_ota` with a version check and signed images. Mark the new program valid only after it connects successfully; otherwise it rolls back automatically.
+- [x] **1.11 Updates over Wi-Fi (OTA).** Upload `firmware.ino.bin` on the page; the server reads board + version from a marker in the file and keeps the newest per board. A device updates on request: download, SHA-256 check, image check, restart. The new version must reach the server within 3 min or the bootloader rolls back. Image signing comes with secure boot in 5.4.
 
 **New features**
 - [ ] **1.12 Doorbell.** Rings from the button, a Bluetooth characteristic (NimBLE) or a QR link. 10 s cooldown, and the event goes to the cloud so the owner gets notified.

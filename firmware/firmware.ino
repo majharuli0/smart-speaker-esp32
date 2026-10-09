@@ -6,6 +6,7 @@
 //   timesync - real time from NTP, in the device's time zone
 //   alarms - alarms stored on the device, rung from its own clock
 //   tonecache - the tones those alarms use, stored on the device (S3)
+//   ota    - firmware updates over Wi-Fi, with automatic rollback
 // Messages are documented in docs/protocol.md.
 #include <ArduinoJson.h>
 #include "config.h"
@@ -15,6 +16,7 @@
 #include "timesync.h"
 #include "alarms.h"
 #include "tonecache.h"
+#include "ota.h"
 
 static void blink() {
   digitalWrite(LED_BUILTIN, HIGH);
@@ -23,9 +25,10 @@ static void blink() {
 }
 
 static void onConnected() {
-  netSend("{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\",\"fw\":\"" FW_VERSION "\"}");
+  netSend("{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\",\"fw\":\"" FW_VERSION "\",\"board\":\"" CONFIG_IDF_TARGET "\"}");
   sendVolume();
   sendPartitions();
+  otaReport();
 }
 
 static void onCommand(uint8_t *payload, size_t length) {
@@ -46,6 +49,7 @@ static void onCommand(uint8_t *payload, size_t length) {
   else if (cmd == "partitions") sendPartitions();
   else if (cmd == "alarms_sync") { alarmsSync(doc); cacheSync(doc["tones"]); }
   else if (cmd == "timezone") setTimezone(doc["tz"] | "", doc["name"] | "");
+  else if (cmd == "ota_start") otaStart(doc);
   else if (cmd == "reset_wifi") resetWifi();
 }
 
@@ -53,6 +57,7 @@ static void onAudio(uint8_t *payload, size_t length) { talkPush(payload, length)
 
 void setup() {
   Serial.begin(115200);
+  otaSetup();
   pinMode(LED_BUILTIN, OUTPUT);  // GPIO 2 on ESP32, the RGB LED (GPIO 48) on the S3
   audioSetup();
   cacheSetup();  // before statsSetup, which measures the storage it mounts
@@ -69,6 +74,7 @@ void loop() {
   timeLoop();
   alarmsLoop();
   cacheLoop();
+  otaLoop();
 
   // Let core 1's idle task run, so CPU load reads true (and the chip runs cooler).
   // Safe for audio: each pass moves 16 ms of sound and the I2S queue holds 128 ms.

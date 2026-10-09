@@ -70,7 +70,7 @@ function connect(server, hello) {
   });
 }
 
-const device = (server, deviceId) => connect(server, { type: 'hello', role: 'device', deviceId, fw: 'test' });
+const device = (server, deviceId, extra = {}) => connect(server, { type: 'hello', role: 'device', deviceId, fw: 'test', ...extra });
 const browser = (server) => connect(server, { type: 'hello', role: 'browser' });
 // Every device is sent these when it connects; they aren't commands
 const ON_CONNECT = ['timezone', 'alarms_sync'];

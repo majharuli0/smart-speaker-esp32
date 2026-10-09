@@ -4,6 +4,10 @@ node_modules
 backend/alarms.json
 backend/tones/
 backend/devices.json
+backend/firmware/
 
 # Local backend settings (copy from backend/.env.example)
 backend/.env
+
+# Firmware build output (.bin files for updates over Wi-Fi)
+firmware/build/

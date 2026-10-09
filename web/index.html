@@ -49,11 +49,20 @@
   </div>
   <ul id="tones"></ul>
 
+  <h2>Firmware</h2>
+  <div class="row">
+    <input id="fwfile" type="file" accept=".bin">
+    <button id="fwupload">Upload</button>
+    <span id="fwmsg" class="muted"></span>
+  </div>
+  <p class="muted">Build with <code>./fw.sh build</code>, then upload <code>firmware/build/s3/firmware.ino.bin</code>. Devices with a different version get an <b>Update</b> button.</p>
+  <ul id="fwlist"></ul>
+
 <script>
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MAX_TONE_SECONDS = 30;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {}, alarmVersions: {}, acked: {}, cache: {} };
+  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {}, alarmVersions: {}, acked: {}, cache: {}, firmware: {} };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
   const uidOf = (id) => id.replace('esp32-', '').toUpperCase(); // display only; commands use id
@@ -71,7 +80,7 @@
 
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
-    if (['devices', 'alarms', 'tones'].includes(msg.type)) {
+    if (['devices', 'alarms', 'tones', 'firmware'].includes(msg.type)) {
       state[msg.type] = msg[msg.type];
       if (msg.type === 'alarms') state.alarmVersions = msg.versions || {};
       render();
@@ -101,6 +110,15 @@
     } else if (msg.type === 'talk_denied') {
       stopTalk();
       alert(msg.reason === 'busy' ? 'Someone else is already talking to this device.' : 'Device is offline.');
+    } else if (msg.type === 'ota') {
+      const text = {
+        downloading: `⬇ updating firmware ${Number(msg.progress) || 0}%`,
+        restarting: '🔄 restarting with the new firmware…',
+        done: `✓ updated to ${esc(msg.version)}`,
+        failed: `⚠ update failed: ${esc(msg.error || '')}`,
+        rolled_back: `⚠ new firmware failed to start; went back to ${esc(msg.version)}`,
+      }[msg.state];
+      if (text) setStatus(msg.deviceId, text);
     } else if (msg.type === 'alarms_ack' || msg.type === 'cache') {
       state[msg.type === 'cache' ? 'cache' : 'acked'][msg.deviceId] = msg;
       const el = document.getElementById(`sync-${msg.deviceId}`);
@@ -129,6 +147,11 @@
       <span class="muted">${pct}% · ${detail}</span></div>`;
   }
 
+  function updateButton(s) {
+    const fw = state.firmware[s.board];
+    return fw && s.fw && fw.version !== s.fw ? ` <button data-cmd="ota">Update to ${esc(fw.version)}</button>` : '';
+  }
+
   function statsHtml(s) {
     if (!s) return '<span class="muted">waiting for stats…</span>';
     const n = (v) => Number(v) || 0; // device data: numbers only into the HTML
@@ -141,7 +164,7 @@
       `<div>🕒 ${s.time ? esc(s.time) : '<span class="muted">clock not set yet (waiting for internet time)</span>'}
         <span class="muted">${esc(s.tz || '')}</span>
         ${s.tz && s.tz !== tz ? `· <a href="#" data-cmd="settz">Use my time zone (${esc(tz)})</a>` : ''}</div>`,
-      `<div class="muted">Firmware ${esc(s.fw || '?')} · Up ${uptime(n(s.uptime))} · Wi-Fi ${n(s.rssi)} dBm (${signal(n(s.rssi))}) · ${size(n(s.flashSize))} flash chip</div>`,
+      `<div class="muted">Firmware ${esc(s.fw || '?')}${updateButton(s)} · Up ${uptime(n(s.uptime))} · Wi-Fi ${n(s.rssi)} dBm (${signal(n(s.rssi))}) · ${size(n(s.flashSize))} flash chip</div>`,
     ].join('');
   }
 
@@ -195,6 +218,9 @@
   }
 
   function render() {
+    $('fwlist').innerHTML = Object.values(state.firmware)
+      .map((f) => `<li>${esc(f.board)}: <b>${esc(f.version)}</b> <span class="muted">(${size(Number(f.size) || 0)}, uploaded ${esc(new Date(f.uploaded).toLocaleString())})</span></li>`)
+      .join('') || '<li class="muted">No firmware uploaded yet.</li>';
     $('tones').innerHTML = state.tones
       .map((t) => `<li><a href="http://${serverHost}/tones/${esc(t)}" target="_blank">${esc(t)}</a></li>`)
       .join('') || '<li class="muted">No tones yet, upload one below.</li>';
@@ -248,6 +274,9 @@
     const alarm = state.alarms.find((a) => a.id === e.target.closest('[data-alarm]')?.dataset.alarm);
 
     if (cmd === 'settz') { e.preventDefault(); send({ type: 'set_timezone', target: id, tz }); }
+    if (cmd === 'ota' && confirm(`Update ${uidOf(id)} over Wi-Fi? It restarts when done (about 30 s).`)) {
+      send({ type: 'ota', target: id });
+    }
     if (cmd === 'blink') send({ type: 'blink', target: id });
     if (cmd === 'test') tone ? send({ type: 'ring', target: id, tone }) : alert('Upload a tone first');
     if (cmd === 'stop') send({ type: 'stop', target: id });
@@ -333,6 +362,21 @@
     }
     return v.buffer;
   }
+
+  $('fwupload').onclick = async () => {
+    const file = $('fwfile').files[0];
+    if (!file) return alert('Choose firmware/build/s3/firmware.ino.bin first.');
+    $('fwmsg').textContent = 'Uploading…';
+    try {
+      const res = await fetch(`http://${serverHost}/firmware`, { method: 'POST', body: file });
+      const data = await res.json().catch(() => ({ error: `upload failed (${res.status}): file too big? use firmware.ino.bin, not merged.bin` }));
+      if (!res.ok) throw new Error(data.error);
+      $('fwmsg').textContent = `Uploaded ${data.version} for ${data.board}`;
+      $('fwfile').value = '';
+    } catch (err) {
+      $('fwmsg').textContent = `Error: ${err.message}`;
+    }
+  };
 
   $('upload').onclick = async () => {
     const file = $('file').files[0];

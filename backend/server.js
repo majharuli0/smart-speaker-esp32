@@ -13,9 +13,11 @@ const DATA_DIR = path.resolve(__dirname, process.env.DATA_DIR || '.');
 const TONES_DIR = path.join(DATA_DIR, 'tones');
 const ALARMS_FILE = path.join(DATA_DIR, 'alarms.json');
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
+const FIRMWARE_DIR = path.join(DATA_DIR, 'firmware'); // newest firmware per board: <board>.bin + <board>.json
 // Time zone for devices that haven't been given one: this machine's (right for a local server)
 const DEFAULT_TZ = process.env.TZ_DEFAULT || Intl.DateTimeFormat().resolvedOptions().timeZone;
 fs.mkdirSync(TONES_DIR, { recursive: true });
+fs.mkdirSync(FIRMWARE_DIR, { recursive: true });
 
 // [{ id, deviceId, time: "07:00" (device's local time), days: [0..6, Sun=0], tone, enabled }]
 let alarms = [];
@@ -69,6 +71,38 @@ app.post('/tones', express.raw({ type: () => true, limit: '20mb' }), (req, res) 
   }
   res.end();
 });
+
+// ---- Firmware updates ----
+// The uploaded .bin carries a marker "SSFW:<board>:<version>:END" (see
+// firmware/ota.cpp), so the server knows which devices it fits and refuses
+// files that aren't this firmware. Only the newest file per board is kept.
+const MAX_FIRMWARE = 3 * 1024 * 1024; // the S3's program slot is 3 MB (the 16 MB merged.bin is not an update file)
+
+function readFirmwareMarker(buf) {
+  if (buf[0] !== 0xe9) return null; // every ESP32 program image starts with this byte
+  const m = buf.toString('latin1').match(/SSFW:([a-z0-9]+):([0-9A-Za-z.-]+):END/);
+  return m && { board: m[1], version: m[2] };
+}
+
+function firmwareList() {
+  return Object.fromEntries(fs.readdirSync(FIRMWARE_DIR).filter((f) => f.endsWith('.json')).map((f) => {
+    const meta = JSON.parse(fs.readFileSync(path.join(FIRMWARE_DIR, f), 'utf8'));
+    return [meta.board, meta];
+  }));
+}
+
+app.post('/firmware', express.raw({ type: () => true, limit: MAX_FIRMWARE }), (req, res) => {
+  const buf = req.body;
+  const found = Buffer.isBuffer(buf) && buf.length ? readFirmwareMarker(buf) : null;
+  if (!found) return res.status(400).json({ error: 'not a firmware file for this project (use firmware/build/<board>/firmware.ino.bin)' });
+  const meta = { ...found, size: buf.length, sha256: crypto.createHash('sha256').update(buf).digest('hex'), uploaded: new Date().toISOString() };
+  fs.writeFileSync(path.join(FIRMWARE_DIR, `${meta.board}.bin`), buf);
+  fs.writeFileSync(path.join(FIRMWARE_DIR, `${meta.board}.json`), JSON.stringify(meta, null, 2));
+  console.log(`Firmware ${meta.version} for ${meta.board} uploaded (${meta.size} bytes)`);
+  toBrowsers({ type: 'firmware', firmware: firmwareList() });
+  res.json(meta);
+});
+app.use('/firmware', express.static(FIRMWARE_DIR, { extensions: false }));
 
 // PORT=0 picks a free port (tests use this); log the real one
 const server = app.listen(PORT, (err) => {
@@ -200,6 +234,7 @@ wss.on('connection', (ws) => {
       ws.role = msg.role;
       if (ws.role === 'device') {
         ws.deviceId = msg.deviceId;
+        ws.board = msg.board; // which firmware file fits it
         devices.set(ws.deviceId, ws);
         console.log(`Device online: ${ws.deviceId}`);
         toBrowsers(deviceList());
@@ -209,12 +244,21 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify(deviceList()));
         ws.send(JSON.stringify(alarmsMessage()));
         ws.send(JSON.stringify({ type: 'tones', tones: listTones() }));
+        ws.send(JSON.stringify({ type: 'firmware', firmware: firmwareList() }));
       }
       return;
     }
 
     if (ws.role === 'browser' && msg.type === 'alarm_save') return saveAlarm(msg.alarm || {});
     if (ws.role === 'browser' && msg.type === 'alarm_delete') return deleteAlarm(msg.id);
+
+    // Update a device to the newest firmware for its board
+    if (ws.role === 'browser' && msg.type === 'ota') {
+      const dev = devices.get(msg.target);
+      const meta = dev && firmwareList()[dev.board];
+      if (!meta) return ws.send(JSON.stringify({ type: 'ota', deviceId: msg.target, state: 'failed', error: dev ? 'no firmware uploaded for this board' : 'device offline' }));
+      return toDevice(msg.target, { type: 'ota_start', path: `/firmware/${meta.board}.bin`, version: meta.version, size: meta.size, sha256: meta.sha256 });
+    }
 
     if (ws.role === 'browser' && msg.type === 'set_timezone') {
       if (!msg.target || !isValidTz(msg.tz)) return;

@@ -64,6 +64,7 @@ static void sendStats() {
   doc["uptime"] = millis() / 1000;
   doc["rssi"] = WiFi.RSSI();
   doc["fw"] = FW_VERSION;
+  doc["board"] = CONFIG_IDF_TARGET;          // which firmware file fits this device
   doc["time"] = timeNow();                  // local time, "" until NTP has synced
   doc["tz"] = timezoneName();
 

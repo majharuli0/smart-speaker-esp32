@@ -2,7 +2,7 @@
 
 How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.5.0` and backend `0.2.0`.
+**Version:** matches firmware `0.6.0` and backend `0.2.0`.
 
 ---
 
@@ -15,6 +15,8 @@ How the ESP32, the server and the web page talk to each other. This is the singl
 | Tone upload | `POST /tones` | Browser |
 | Tone download | `GET /tones/<name>.wav` | Device (while ringing), browser (preview) |
 | Mic processor | `GET /mic-worklet.js` | Browser (hold to talk) |
+| Firmware upload | `POST /firmware` | Browser |
+| Firmware download | `GET /firmware/<board>.bin` | Device (while updating) |
 | Server discovery | mDNS: `led-server.local` → the server's LAN IP (A record) | Device, at boot |
 
 - The device looks up `led-server.local` once at boot, and keeps retrying every second until it's found. It then keeps a WebSocket open to that IP, reconnecting every 3 s if it drops.
@@ -38,8 +40,8 @@ All text messages are JSON objects with a `type`. The only binary messages are t
 
 | From | Message | Server's response |
 |---|---|---|
-| Device | `{type:"hello", role:"device", deviceId, fw}` | Registers the device, then sends `devices` to all browsers. The device follows up with `volume` and `partitions`. |
-| Browser | `{type:"hello", role:"browser"}` | Sends that browser `devices`, `alarms` and `tones` |
+| Device | `{type:"hello", role:"device", deviceId, fw, board}` | Registers the device, then sends `devices` to all browsers. The device follows up with `volume` and `partitions`. |
+| Browser | `{type:"hello", role:"browser"}` | Sends that browser `devices`, `alarms`, `tones` and `firmware` |
 
 If a device reconnects before its old connection closes, the new connection replaces the old one. The device stays online.
 
@@ -51,6 +53,7 @@ If a device reconnects before its old connection closes, the new connection repl
 | `{type:"alarms", alarms:[Alarm, ...], versions:{deviceId: version}}` | On browser hello, and after any alarm change. All alarms for all devices, plus the version each device should confirm (see 5). |
 | `{type:"tones", tones:["name.wav", ...]}` | On browser hello, and after an upload |
 | `{type:"talk_denied", deviceId, reason:"busy"\|"offline"}` | Only to the browser whose `talk_start` was refused |
+| `{type:"firmware", firmware:{board: {board, version, size, sha256, uploaded}}}` | On browser hello, and after a firmware upload. The newest file per board. |
 
 ### 3.3 Browser → server (handled by the server, not relayed)
 
@@ -60,6 +63,7 @@ If a device reconnects before its old connection closes, the new connection repl
 | `{type:"alarm_delete", id}` | Delete the alarm |
 | `{type:"talk_start", target}` | Starts a talk session if nobody else is talking to `target` and it's online. Otherwise replies with `talk_denied`. On success it's also relayed to the device. |
 | `{type:"talk_stop", target}` | Ends the session; also relayed to the device |
+| `{type:"ota", target}` | Update `target` to the newest firmware for its board: sends it `ota_start`. If there's no file for its board, or it's offline, replies `{type:"ota", deviceId, state:"failed", error}`. |
 | `{type:"set_timezone", target, tz}` | Saves an IANA zone name (e.g. `Asia/Dhaka`) for that device and sends it a `timezone`. Unknown names are ignored. |
 
 ### 3.4 Browser → device (relayed as-is to `target`)
@@ -84,6 +88,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"timezone", tz, name}` | On connect, then every hour. `tz` is the POSIX rule the ESP32 uses, `name` the IANA zone. See section 8. |
 | `{type:"alarms_sync", version, alarms:[{id, time, days, tone, enabled}], tones:[{name, size, sha256}]}` | On connect, after any change to this device's alarms, and when a tone they use is re-uploaded. Only its own alarms, plus the tones they use (section 5). |
 | `{type:"talk_stop"}` | The browser that was talking closed its tab or lost its connection |
+| `{type:"ota_start", path, version, size, sha256}` | After a browser's `ota`. See section 9. |
 
 ### 3.6 Device → browsers (relayed to all browsers, with `deviceId` added)
 
@@ -92,6 +97,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"ringing"}` / `{type:"stopped"}` | A tone (or the built-in beep) starts / stops: Stop pressed, or the 60 s limit reached |
 | `{type:"alarms_ack", version, count}` | After every `alarms_sync`: the list is saved on the device |
 | `{type:"alarm_fired", alarmId, time}` | The device rang an alarm from its own clock |
+| `{type:"ota", state, progress?, error?, version}` | Update progress: `downloading` (0–100, every 10%), `restarting`, then from the new version `done`, or `failed`. `rolled_back` means the new version failed to start and the device went back to `version`. |
 | `{type:"cache", stored, wanted}` | How many of its alarms' tones are stored on the device. After each sync and each finished download. S3 only. |
 | `{type:"talking"}` / `{type:"talk_stopped"}` | Talk playback starts / ends |
 | `{type:"volume", value}` | On connect, and after any `volume` request |
@@ -177,6 +183,7 @@ device: saves the list in flash → alarms_ack {version, count}
 | `uptime` | Seconds since boot |
 | `rssi` | Wi-Fi signal in dBm |
 | `fw` | Firmware version |
+| `board` | Chip type (`esp32s3`, `esp32`): which firmware file fits |
 | `time` | Device's local time `YYYY-MM-DD HH:MM:SS`, or `""` until the first internet time sync |
 | `tz` | Device's time zone name |
 
@@ -212,3 +219,23 @@ device: saves the list in flash → alarms_ack {version, count}
 - **POSIX rule:** the ESP32 needs the zone as a POSIX rule, built from the zone's current UTC offset. POSIX counts hours *west* of UTC, so the sign flips: `Asia/Dhaka` → `<+06>-6`, `Asia/Kolkata` → `<+0530>-5:30`, `America/Argentina/Buenos_Aires` → `<-03>3`, UTC → `UTC0`.
 - **Daylight saving:** the rule has no DST dates in it. The server re-sends every hour, so a device is at most an hour late switching, and only if it's online.
 - The device saves the last zone it received, so it keeps the right local time after a restart even before the server connects.
+
+---
+
+## 9. Firmware updates over Wi-Fi
+
+- **Upload:** `POST /firmware` with `firmware/build/<profile>/firmware.ino.bin` as the body (made by `./fw.sh build`). The server checks:
+  - the first byte is `0xE9`, the ESP32 program-image byte;
+  - the marker `SSFW:<board>:<version>:END` is in the file. The firmware carries it (`ota.cpp`), so the board and version come from the file itself;
+  - the file is at most 3 MB, the program slot (the 16 MB `merged.bin` is refused).
+
+  It keeps only the newest file per board, in `firmware/<board>.bin` + `.json` under `DATA_DIR`.
+- **Update:**
+  ```
+  page: ota {target} → server: ota_start {path, version, size, sha256} → device
+  device: downloads into the spare program slot, checks SHA-256, the update library checks the image,
+          marks it to boot, restarts → reports ota progress throughout
+  ```
+  Audio stops during the update. The device does nothing else for the few seconds it takes.
+- **Rollback:** the new version starts **on probation**. It becomes permanent once it connects to the server (`ota` `done`). If it doesn't within **3 minutes**, or it crashes and restarts, the bootloader starts the previous version, which reports `rolled_back` once on its next connect.
+- **Not yet:** signed firmware. It needs secure boot, which comes with the factory setup (roadmap 5.4). The old ESP32 board's "Huge APP" layout has no spare slot, so updates over Wi-Fi fail there with an error. Use USB for it.

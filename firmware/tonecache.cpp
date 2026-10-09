@@ -223,7 +223,12 @@ void cacheSetup() {
 
   SPI.begin(SD_SCK_GPIO, SD_MISO_GPIO, SD_MOSI_GPIO, SD_CS_GPIO);
   mountCard();
-  if (!stores[CARD].ready) Serial.println("No SD card (checking again every few seconds)");
+  if (!stores[CARD].ready) {
+    Serial.println("No SD card found (checking again every few seconds). If one is inserted, check:");
+    Serial.println("  - wiring: CS=10 MOSI=11 SCK=12 MISO=13 (MOSI/MISO swapped is the usual mistake)");
+    Serial.println("  - power: a module with a regulator chip (AMS1117) needs 5V, not 3V3");
+    Serial.println("  - format: FAT32 (cards over 32 GB often come as exFAT)");
+  }
   lastCardCheck = millis();
 }
 

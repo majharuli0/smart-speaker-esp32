@@ -10,7 +10,8 @@ profiles:
   # ESP32-S3-WROOM-1 N16R8: 16 MB flash, 8 MB octal PSRAM, 3 MB app / 9.9 MB FAT,
   # Serial on the native USB-C port (labelled USB)
   s3:
-    fqbn: esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc
+    # DebugLevel=error: the ESP32 core prints its own error messages (e.g. why an SD card failed)
+    fqbn: esp32:esp32:esp32s3:FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB,CDCOnBoot=cdc,DebugLevel=error
     platforms:
       - platform: esp32:esp32 (3.3.12)
         platform_index_url: https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json

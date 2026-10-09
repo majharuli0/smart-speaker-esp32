@@ -2,7 +2,7 @@
 
 How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.6.0` and backend `0.2.0`.
+**Version:** matches firmware `0.7.0` and backend `0.2.0`.
 
 ---
 
@@ -98,7 +98,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"alarms_ack", version, count}` | After every `alarms_sync`: the list is saved on the device |
 | `{type:"alarm_fired", alarmId, time}` | The device rang an alarm from its own clock |
 | `{type:"ota", state, progress?, error?, version}` | Update progress: `downloading` (0–100, every 10%), `restarting`, then from the new version `done`, or `failed`. `rolled_back` means the new version failed to start and the device went back to `version`. |
-| `{type:"cache", stored, wanted}` | How many of its alarms' tones are stored on the device. After each sync and each finished download. |
+| `{type:"cache", stored, wanted, card}` | How many of its alarms' tones are stored on the device (on the card, built-in, or both), and whether a microSD card is in. After each sync, each finished download, and when a card is inserted or removed. |
 | `{type:"talking"}` / `{type:"talk_stopped"}` | Talk playback starts / ends |
 | `{type:"volume", value}` | On connect, and after any `volume` request |
 | `{type:"stats", ...}` | Every 2 s while connected. See 6.1. |
@@ -160,7 +160,9 @@ device: saves the list in flash → alarms_ack {version, count}
   - deletes stored tones no alarm uses any more;
   - retries a failed download 30 s later.
 
-  Because files are named by their hash, a re-uploaded tone (new content) is a new file. Storage is the 9.9 MB `ffat` partition, formatted on first boot.
+  Because files are named by their hash, a re-uploaded tone (new content) is a new file.
+- **Where tones are kept:** the **microSD card** (if inserted, FAT32) and the built-in 9.9 MB `ffat` partition, formatted on first boot. Each tone is kept in **both** when it fits, so an alarm still has its tone if the card is pulled. Playing tries the card first, then built-in storage. Clean-up only touches the device's own files (`<8 hex>.wav` / `.tmp` in the card's root); anything else on the card is left alone.
+- **Card in / out:** a missing card is looked for every 5 s, but not while sound is playing, since starting a card can take a moment. A card that's in is checked every 5 s by reading block 0. A failed read while playing triggers that check at once, and playback carries on from built-in storage.
 - **After a restart with no internet,** the clock can't be set (no battery-backed clock yet), so alarms wait until the internet is back.
 
 ---
@@ -195,6 +197,7 @@ device: saves the list in flash → alarms_ack {version, count}
               "used": 1334751, "note": "running program" }, … ] }
 ```
 - `kind`: `app` | `nvs` | `files` | `system` | `other`.
+- `sd`: `{present}`, plus `{type, size, total, used}` (bytes) when a microSD card is in. Sent again when a card is inserted or removed.
 - `used` is only present when measured: the running app, NVS, and a formatted file storage (which also has `fsTotal`).
 - The page adds a `bootloader` row for the space before the first partition.
 

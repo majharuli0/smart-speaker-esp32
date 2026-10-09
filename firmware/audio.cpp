@@ -6,7 +6,6 @@
 #include "config.h"
 #include "net.h"
 #include "tonecache.h"
-#include <FFat.h>
 
 static Preferences prefs;
 static int volume = DEFAULT_VOLUME;
@@ -101,14 +100,11 @@ static bool openTone() {
   if (ringingTone.isEmpty()) return false;
   fromFile = false;
   if (toneFile) toneFile.close();
-  String stored = cachedPath(ringingTone);
-  if (stored.length()) {
-    toneFile = FFat.open(stored, "r");
-    if (toneFile && toneFile.seek(44)) {  // skip the 44-byte WAV header
-      fromFile = true;
-      toneBytesLeft = toneFile.size() - 44;
-      return toneBytesLeft > 0;
-    }
+  // Stored copy: SD card first, then built-in storage
+  if (cacheOpen(ringingTone, toneFile) && toneFile.seek(44)) {  // skip the 44-byte WAV header
+    fromFile = true;
+    toneBytesLeft = toneFile.size() - 44;
+    return toneBytesLeft > 0;
   }
   http.setConnectTimeout(TONE_TIMEOUT_MS);  // don't hang when offline: beep instead
   http.setTimeout(TONE_TIMEOUT_MS);
@@ -159,7 +155,7 @@ void toneStart(const String &tone) {
   ringingTone = tone;
   ringStart = millis();
   if (!openTone()) startBeep();
-  Serial.println("Ringing: " + tone + (beeping ? "" : fromFile ? " (stored on device)" : " (streaming)"));
+  Serial.println("Ringing: " + tone + (beeping ? "" : fromFile ? "" : " (streaming)"));
   netSend("{\"type\":\"ringing\"}");
 }
 
@@ -178,7 +174,11 @@ static void pumpTone() {
     int16_t mono[256];
     size_t want = min(sizeof(mono), (size_t)toneBytesLeft) & ~(size_t)1;
     int samples = toneFile.read((uint8_t *)mono, want) / 2;
-    if (samples <= 0) { toneBytesLeft = 0; return; }  // end or read error: loop from the start
+    if (samples <= 0) {  // read failed before the end: card pulled out? Check it, then reopen
+      cacheCheckNow();    // (from built-in storage if the card is gone)
+      toneBytesLeft = 0;
+      return;
+    }
     toneBytesLeft -= samples * 2;
     playSamples(mono, samples);
     return;
@@ -260,3 +260,5 @@ void audioLoop() {
   pumpTone();
   pumpTalk();
 }
+
+bool audioBusy() { return ringing || talking; }

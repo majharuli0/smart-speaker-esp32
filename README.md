@@ -80,6 +80,17 @@ Amp wiring (MAX98357A; GAIN and SD unconnected):
 | VIN | 5V |
 | GND | GND |
 
+microSD card module (SPI, powered from **3V3** unless the module has its own regulator; card formatted FAT32):
+
+| SD module pin | ESP32-S3 |
+|---|---|
+| CS | GPIO 10 |
+| MOSI | GPIO 11 |
+| SCK | GPIO 12 |
+| MISO | GPIO 13 |
+| VCC | 3V3 |
+| GND | GND |
+
 Arduino IDE settings (`./fw.sh` sets these for you): Board **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM **OPI PSRAM**, Partition Scheme **16M Flash (3MB APP/9.9MB FATFS)**, upload through the USB-C port labelled **COM**.
 
 ## Protocol

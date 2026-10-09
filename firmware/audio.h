@@ -18,3 +18,5 @@ void talkStart();
 void talkPush(const uint8_t *data, size_t length);
 void talkFinish();  // play out what's buffered, then stop
 void talkStop();    // stop now
+
+bool audioBusy();   // a tone or talk is playing (don't start slow work like mounting a card)

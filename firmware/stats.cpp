@@ -140,6 +140,7 @@ static void buildPartitions() {
       default:                                  o["kind"] = "other";
     }
   }
+  cardInfo(doc["sd"].to<JsonObject>());  // the microSD card, if one is inserted
   serializeJson(doc, partitionsJson);
 }
 

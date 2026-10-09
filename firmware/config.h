@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.6.1"
+#define FW_VERSION "0.7.0"
 
 // ---- Server ----
 #define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
@@ -39,6 +39,15 @@
 // Tones stored on the device (in the 9.9 MB "ffat" area) so alarms play the real tone offline
 #define TONE_CACHE_PARTITION "ffat"
 #define TONE_RETRY_MS 30000   // after a failed download, try again this much later
+
+// microSD card module (SPI, 3V3): GPIO 10-13 sit together on the left header
+// and are the S3's own fast SPI pins. Card formatted FAT32.
+#define SD_CS_GPIO   10
+#define SD_MOSI_GPIO 11
+#define SD_SCK_GPIO  12
+#define SD_MISO_GPIO 13
+#define SD_SPI_HZ    8000000  // 8 MHz: plenty for audio, reliable over jumper wires
+#define SD_CHECK_MS  5000     // how often to notice a card being inserted or removed
 
 // Live voice from the browser (same 16 kHz mono format as tones)
 #define TALK_BUF_SAMPLES 4096  // 256 ms ring buffer; when full the oldest audio is dropped

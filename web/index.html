@@ -133,7 +133,7 @@
   }
 
   // ---- Device health (RAM / storage / CPU), pushed by each device every 2 s ----
-  const size = (b) => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
+  const size = (b) => (b >= 1073741824 ? `${(b / 1073741824).toFixed(1)} GB` : b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.round(b / 1024)} KB`);
   const uptime = (s) => {
     const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
     return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m ${s % 60}s`;
@@ -199,7 +199,18 @@
         <tr><th>Part</th><th>Size</th><th>Used</th></tr>
         ${rows.map((x, i) => `<tr><td><span class="swatch" style="background:${x.used ? color(i) : '#e5e7eb'}"></span>${esc(x.name)}</td>
           <td>${size(x.size)}</td><td>${x.used ? size(x.used) : '0'}</td></tr>`).join('')}
-      </table>`;
+      </table>${sdHtml(p.sd)}`;
+  }
+
+  // The microSD card, reported with the flash layout
+  function sdHtml(sd) {
+    if (!sd) return '';
+    if (!sd.present) return '<div class="muted" style="margin-top:0.5rem"><b>SD card:</b> none inserted</div>';
+    const n = (v) => Number(v) || 0;
+    const total = n(sd.total), used = n(sd.used);
+    return `<div style="margin-top:0.5rem"><b>SD card ${size(n(sd.size))}</b> <span class="muted">${esc(sd.type)}</span>
+      · ${size(used)} used · ${size(total - used)} free</div>
+      <div class="flashbar"><i title="used: ${size(used)}" style="flex-grow:${used};background:#0891b2"></i><i title="free: ${size(total - used)}" style="flex-grow:${total - used};background:#e5e7eb"></i></div>`;
   }
 
   // Has the device confirmed (alarms_ack) the latest alarm list the server sent it?
@@ -214,7 +225,7 @@
     const c = state.cache[id];
     if (!c || !Number(c.wanted)) return alarmsLine;
     const stored = Number(c.stored) || 0, wanted = Number(c.wanted);
-    return `${alarmsLine} · ${stored === wanted ? '🎵' : '⏳'} ${stored} of ${wanted} tone${wanted === 1 ? '' : 's'} stored on the device${stored === wanted ? '' : ' (downloading…)'}`;
+    return `${alarmsLine} · ${stored === wanted ? '🎵' : '⏳'} ${stored} of ${wanted} tone${wanted === 1 ? '' : 's'} stored on the device${c.card ? ' (SD card + built-in)' : ''}${stored === wanted ? '' : ' (downloading…)'}`;
   }
 
   function render() {

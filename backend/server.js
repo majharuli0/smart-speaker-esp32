@@ -149,6 +149,9 @@ function toDevice(deviceId, msg) {
 
 const deviceList = () => ({ type: 'devices', devices: [...devices.keys()] });
 
+// A device's latest status reports, kept so a page opened later still gets them
+const REPLAYED_REPORTS = ['alarms_ack', 'cache', 'volume', 'partitions', 'stats'];
+
 function sendTimezone(deviceId) {
   const tz = deviceSettings[deviceId]?.tz || DEFAULT_TZ;
   toDevice(deviceId, { type: 'timezone', tz: posixTz(tz), name: tz });
@@ -245,6 +248,8 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify(alarmsMessage()));
         ws.send(JSON.stringify({ type: 'tones', tones: listTones() }));
         ws.send(JSON.stringify({ type: 'firmware', firmware: firmwareList() }));
+        // Devices send these once (on connect or on change), so replay them for a page opened later
+        devices.forEach((dev) => Object.values(dev.lastReports || {}).forEach((m) => ws.send(JSON.stringify(m))));
       }
       return;
     }
@@ -281,7 +286,11 @@ wss.on('connection', (ws) => {
     // Browser -> device: relay any other command to msg.target.
     // Device -> browsers: relay anything, tagged with which device sent it.
     if (ws.role === 'browser') toDevice(msg.target, msg);
-    else if (ws.role === 'device') toBrowsers({ ...msg, deviceId: ws.deviceId });
+    else if (ws.role === 'device') {
+      const tagged = { ...msg, deviceId: ws.deviceId };
+      if (REPLAYED_REPORTS.includes(msg.type)) (ws.lastReports ??= {})[msg.type] = tagged;
+      toBrowsers(tagged);
+    }
   });
 
   ws.on('close', () => {

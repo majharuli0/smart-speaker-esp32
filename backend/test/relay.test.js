@@ -63,3 +63,22 @@ test('a reconnecting device replacing its old socket stays online', async () => 
   await second.waitFor((m) => m.type === 'blink');
   second.close(); br.close();
 });
+
+test('a page opened later still gets each device\'s latest status reports', async () => {
+  const dev = await device(server, 'esp32-replay');
+  const early = await browser(server);
+  await online(early, 'esp32-replay');
+  dev.sendJson({ type: 'alarms_ack', version: 'v1', count: 1 });
+  dev.sendJson({ type: 'alarms_ack', version: 'v2', count: 2 }); // only the latest is kept
+  dev.sendJson({ type: 'cache', stored: 1, wanted: 1 });
+  dev.sendJson({ type: 'ringing' });                              // events are not replayed
+  await early.waitFor((m) => m.type === 'cache');
+
+  const late = await browser(server);
+  const ack = await late.waitFor((m) => m.type === 'alarms_ack' && m.deviceId === 'esp32-replay');
+  assert.equal(ack.version, 'v2');
+  await late.waitFor((m) => m.type === 'cache' && m.deviceId === 'esp32-replay');
+  await sleep(100);
+  assert.equal(late.messages.filter((m) => m.type === 'ringing').length, 0);
+  dev.close(); early.close(); late.close();
+});

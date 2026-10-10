@@ -164,8 +164,10 @@ probe.connect(80, '8.8.8.8', () => {
   lanIp = probe.address().address;
   probe.close();
   if (MDNS_ENABLED) advertiseMdns(lanIp);
+  publishHttpBase();
 });
-const lanUrl = () => (lanIp ? `http://${lanIp}:${server.address().port}` : null);
+// PUBLIC_URL overrides it once the server runs somewhere else (e.g. the cloud)
+const lanUrl = () => process.env.PUBLIC_URL || (lanIp ? `http://${lanIp}:${server.address().port}` : null);
 
 const wss = new WebSocketServer({ server });
 const devices = new Map(); // deviceId -> ws
@@ -263,106 +265,171 @@ function deleteAlarm(id) {
   syncAlarms(gone.deviceId);
 }
 
-wss.on('connection', (ws) => {
-  ws.on('message', (raw, isBinary) => {
-    // Voice chunks (16 kHz 16-bit mono PCM) from a talking browser go straight
-    // to its device. Dropped if the device falls behind, so delay can't pile up.
-    if (isBinary) {
-      const dev = devices.get(ws.talkTarget);
-      if (ws.role === 'browser' && dev?.readyState === 1 && dev.bufferedAmount < 16000) dev.send(raw, { binary: true });
-      return;
-    }
+// Messages from a browser, a WebSocket device, or an MQTT device (see the
+// MQTT section: its "link" behaves like a device WebSocket)
+function onMessage(ws, raw, isBinary) {
+  // Voice chunks (16 kHz 16-bit mono PCM) from a talking browser go straight
+  // to its device. Dropped if the device falls behind, so delay can't pile up.
+  if (isBinary) {
+    const dev = devices.get(ws.talkTarget);
+    if (ws.role === 'browser' && dev?.readyState === 1 && dev.bufferedAmount < 16000) dev.send(raw, { binary: true });
+    return;
+  }
 
-    let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
+  let msg;
+  try { msg = JSON.parse(raw); } catch { return; }
 
-    if (msg.type === 'hello') {
-      ws.role = msg.role;
-      if (ws.role === 'device') {
-        ws.deviceId = msg.deviceId;
-        ws.board = msg.board; // which firmware file fits it
-        devices.set(ws.deviceId, ws);
-        console.log(`Device online: ${ws.deviceId}`);
-        toBrowsers(deviceList());
-        sendTimezone(ws.deviceId);
-        syncAlarms(ws.deviceId);
-      } else {
-        ws.send(JSON.stringify(deviceList()));
-        ws.send(JSON.stringify(alarmsMessage()));
-        ws.send(JSON.stringify({ type: 'tones', tones: listTones() }));
-        ws.send(JSON.stringify({ type: 'firmware', firmware: firmwareList() }));
-        ws.send(JSON.stringify({ type: 'events', events: events.slice(0, 50) }));
-        ws.send(JSON.stringify({ type: 'server', lanUrl: lanUrl() }));
-        // Devices send these once (on connect or on change), so replay them for a page opened later
-        devices.forEach((dev) => Object.values(dev.lastReports || {}).forEach((m) => ws.send(JSON.stringify(m))));
-      }
-      return;
-    }
-
-    if (ws.role === 'browser' && msg.type === 'alarm_save') return saveAlarm(msg.alarm || {});
-    if (ws.role === 'browser' && msg.type === 'alarm_delete') return deleteAlarm(msg.id);
-
-    // Doorbell button on the owner's page
-    if (ws.role === 'browser' && msg.type === 'doorbell_ring') {
-      const result = ringDoorbell(msg.target, 'page');
-      if (!result.ok) ws.send(JSON.stringify({ type: 'doorbell_result', deviceId: msg.target, ...result }));
-      return;
-    }
-
-    // Update a device to the newest firmware for its board
-    if (ws.role === 'browser' && msg.type === 'ota') {
-      const dev = devices.get(msg.target);
-      const meta = dev && firmwareList()[dev.board];
-      if (!meta) return ws.send(JSON.stringify({ type: 'ota', deviceId: msg.target, state: 'failed', error: dev ? 'no firmware uploaded for this board' : 'device offline' }));
-      return toDevice(msg.target, { type: 'ota_start', path: `/firmware/${meta.board}.bin`, version: meta.version, size: meta.size, sha256: meta.sha256 });
-    }
-
-    if (ws.role === 'browser' && msg.type === 'set_timezone') {
-      if (!msg.target || !isValidTz(msg.tz)) return;
-      deviceSettings[msg.target] = { ...deviceSettings[msg.target], tz: msg.tz };
-      saveDeviceSettings();
-      return sendTimezone(msg.target);
-    }
-
-    // One talker per device; binary chunks follow until talk_stop
-    if (ws.role === 'browser' && msg.type === 'talk_start') {
-      const busy = [...wss.clients].some((c) => c !== ws && c.talkTarget === msg.target);
-      if (busy || !toDevice(msg.target, msg)) {
-        return ws.send(JSON.stringify({ type: 'talk_denied', deviceId: msg.target, reason: busy ? 'busy' : 'offline' }));
-      }
-      ws.talkTarget = msg.target;
-      return;
-    }
-    if (ws.role === 'browser' && msg.type === 'talk_stop') ws.talkTarget = null;
-
-    // Browser -> device: relay any other command to msg.target.
-    // Device -> browsers: relay anything, tagged with which device sent it.
-    if (ws.role === 'browser') toDevice(msg.target, msg);
-    else if (ws.role === 'device') {
-      // Why the device last restarted (and crash details, if it crashed): keep it in the log
-      if (msg.type === 'boot') {
-        const { reason, fw, crash } = msg;
-        console.log(`Device ${ws.deviceId} started (${reason}, firmware ${fw})${crash ? ' after a CRASH in ' + crash.task : ''}`);
-        return logEvent({ type: 'boot', deviceId: ws.deviceId, reason: String(reason || 'unknown'), fw, ...(crash && { crash }), at: new Date().toISOString() });
-      }
-      const tagged = { ...msg, deviceId: ws.deviceId };
-      // A one-time alarm has now rung: switch it off
-      if (msg.type === 'alarm_fired') {
-        const a = alarms.find((x) => x.id === msg.alarmId && x.deviceId === ws.deviceId);
-        if (a?.date && a.enabled) saveAlarm({ ...a, enabled: false });
-      }
-      if (REPLAYED_REPORTS.includes(msg.type)) (ws.lastReports ??= {})[msg.type] = tagged;
-      toBrowsers(tagged);
-    }
-  });
-
-  ws.on('close', () => {
-    if (ws.talkTarget) toDevice(ws.talkTarget, { type: 'talk_stop' }); // tab closed mid-talk
-    // Only if this socket is still the registered one (a reconnect may have replaced it)
-    if (ws.role === 'device' && devices.get(ws.deviceId) === ws) {
-      devices.delete(ws.deviceId);
-      console.log(`Device offline: ${ws.deviceId}`);
+  if (msg.type === 'hello') {
+    ws.role = ws.viaMqtt ? 'device' : msg.role;
+    if (ws.role === 'device') {
+      ws.deviceId = ws.viaMqtt ? ws.deviceId : msg.deviceId; // MQTT: the ID comes from the topic, not the message
+      ws.board = msg.board; // which firmware file fits it
+      devices.set(ws.deviceId, ws);
+      console.log(`Device online: ${ws.deviceId}`);
       toBrowsers(deviceList());
+      sendTimezone(ws.deviceId);
+      syncAlarms(ws.deviceId);
+    } else {
+      ws.send(JSON.stringify(deviceList()));
+      ws.send(JSON.stringify(alarmsMessage()));
+      ws.send(JSON.stringify({ type: 'tones', tones: listTones() }));
+      ws.send(JSON.stringify({ type: 'firmware', firmware: firmwareList() }));
+      ws.send(JSON.stringify({ type: 'events', events: events.slice(0, 50) }));
+      ws.send(JSON.stringify({ type: 'server', lanUrl: lanUrl() }));
+      // Devices send these once (on connect or on change), so replay them for a page opened later
+      devices.forEach((dev) => Object.values(dev.lastReports || {}).forEach((m) => ws.send(JSON.stringify(m))));
     }
-  });
+    return;
+  }
+
+  if (ws.role === 'browser' && msg.type === 'alarm_save') return saveAlarm(msg.alarm || {});
+  if (ws.role === 'browser' && msg.type === 'alarm_delete') return deleteAlarm(msg.id);
+
+  // Doorbell button on the owner's page
+  if (ws.role === 'browser' && msg.type === 'doorbell_ring') {
+    const result = ringDoorbell(msg.target, 'page');
+    if (!result.ok) ws.send(JSON.stringify({ type: 'doorbell_result', deviceId: msg.target, ...result }));
+    return;
+  }
+
+  // Update a device to the newest firmware for its board
+  if (ws.role === 'browser' && msg.type === 'ota') {
+    const dev = devices.get(msg.target);
+    const meta = dev && firmwareList()[dev.board];
+    if (!meta) return ws.send(JSON.stringify({ type: 'ota', deviceId: msg.target, state: 'failed', error: dev ? 'no firmware uploaded for this board' : 'device offline' }));
+    return toDevice(msg.target, { type: 'ota_start', path: `/firmware/${meta.board}.bin`, version: meta.version, size: meta.size, sha256: meta.sha256 });
+  }
+
+  if (ws.role === 'browser' && msg.type === 'set_timezone') {
+    if (!msg.target || !isValidTz(msg.tz)) return;
+    deviceSettings[msg.target] = { ...deviceSettings[msg.target], tz: msg.tz };
+    saveDeviceSettings();
+    return sendTimezone(msg.target);
+  }
+
+  // One talker per device; binary chunks follow until talk_stop
+  if (ws.role === 'browser' && msg.type === 'talk_start') {
+    const busy = [...wss.clients].some((c) => c !== ws && c.talkTarget === msg.target);
+    if (busy || !toDevice(msg.target, msg)) {
+      return ws.send(JSON.stringify({ type: 'talk_denied', deviceId: msg.target, reason: busy ? 'busy' : 'offline' }));
+    }
+    ws.talkTarget = msg.target;
+    return;
+  }
+  if (ws.role === 'browser' && msg.type === 'talk_stop') ws.talkTarget = null;
+
+  // Browser -> device: relay any other command to msg.target.
+  // Device -> browsers: relay anything, tagged with which device sent it.
+  if (ws.role === 'browser') toDevice(msg.target, msg);
+  else if (ws.role === 'device') {
+    // Why the device last restarted (and crash details, if it crashed): keep it in the log
+    if (msg.type === 'boot') {
+      const { reason, fw, crash } = msg;
+      console.log(`Device ${ws.deviceId} started (${reason}, firmware ${fw})${crash ? ' after a CRASH in ' + crash.task : ''}`);
+      return logEvent({ type: 'boot', deviceId: ws.deviceId, reason: String(reason || 'unknown'), fw, ...(crash && { crash }), at: new Date().toISOString() });
+    }
+    const tagged = { ...msg, deviceId: ws.deviceId };
+    // A one-time alarm has now rung: switch it off
+    if (msg.type === 'alarm_fired') {
+      const a = alarms.find((x) => x.id === msg.alarmId && x.deviceId === ws.deviceId);
+      if (a?.date && a.enabled) saveAlarm({ ...a, enabled: false });
+    }
+    if (REPLAYED_REPORTS.includes(msg.type)) (ws.lastReports ??= {})[msg.type] = tagged;
+    toBrowsers(tagged);
+  }
+}
+
+function onClose(ws) {
+  if (ws.talkTarget) toDevice(ws.talkTarget, { type: 'talk_stop' }); // tab closed mid-talk
+  // Only if this socket is still the registered one (a reconnect may have replaced it)
+  if (ws.role === 'device' && devices.get(ws.deviceId) === ws) {
+    devices.delete(ws.deviceId);
+    console.log(`Device offline: ${ws.deviceId}`);
+    toBrowsers(deviceList());
+  }
+}
+
+wss.on('connection', (ws) => {
+  ws.on('message', (raw, isBinary) => onMessage(ws, raw, isBinary));
+  ws.on('close', () => onClose(ws));
 });
+
+// ---- MQTT: devices connect to the broker (EMQX); the server bridges them ----
+//   ss/dev/<id>/cmd     server → device   commands (JSON)
+//   ss/dev/<id>/audio   server → device   hold-to-talk audio (binary)
+//   ss/dev/<id>/evt     device → server   status and replies (JSON)
+//   ss/dev/<id>/online  device            "1" retained; the broker sets "0" if it drops (last will)
+//   ss/server/online    server            "1" retained / "0" last will: devices say hello again on "1"
+//   ss/server/http      server            retained base URL for downloads (tones, firmware)
+const MQTT_URL = process.env.MQTT_URL; // e.g. mqtts://xxxx.emqxsl.com:8883; unset = WebSocket devices only
+let mqttClient = null;
+const mqttLinks = new Map(); // deviceId -> link
+
+// Stands in for a device WebSocket, so the rest of the server needn't care how a device is connected
+function mqttLink(deviceId) {
+  let link = mqttLinks.get(deviceId);
+  if (!link) {
+    link = {
+      viaMqtt: true, deviceId, readyState: 3, bufferedAmount: 0,
+      send(data, opts) {
+        const audio = opts?.binary;
+        mqttClient.publish(`ss/dev/${deviceId}/${audio ? 'audio' : 'cmd'}`, data, { qos: audio ? 0 : 1 });
+      },
+    };
+    mqttLinks.set(deviceId, link);
+  }
+  return link;
+}
+
+function publishHttpBase() {
+  const url = lanUrl();
+  if (mqttClient?.connected && url) mqttClient.publish('ss/server/http', url, { retain: true, qos: 1 });
+}
+
+if (MQTT_URL) {
+  mqttClient = require('mqtt').connect(MQTT_URL, {
+    username: process.env.MQTT_USERNAME,
+    password: process.env.MQTT_PASSWORD,
+    clientId: `server-${crypto.randomUUID().slice(0, 8)}`,
+    will: { topic: 'ss/server/online', payload: '0', retain: true, qos: 1 },
+  });
+  mqttClient.on('connect', () => {
+    console.log(`MQTT connected to ${new URL(MQTT_URL).host}`);
+    mqttClient.subscribe(['ss/dev/+/evt', 'ss/dev/+/online'], { qos: 1 });
+    mqttClient.publish('ss/server/online', '1', { retain: true, qos: 1 });
+    publishHttpBase();
+  });
+  mqttClient.on('error', (e) => console.log(`MQTT error: ${e.message}`));
+  mqttClient.on('message', (topic, payload) => {
+    const m = topic.match(/^ss\/dev\/(esp32-[0-9a-f]{12})\/(evt|online)$/);
+    if (!m) return;
+    const link = mqttLink(m[1]);
+    if (m[2] === 'online') {
+      if (payload.toString() === '1') link.readyState = 1;
+      else { link.readyState = 3; onClose(link); }
+      return;
+    }
+    link.readyState = 1;
+    onMessage(link, payload, false);
+  });
+}

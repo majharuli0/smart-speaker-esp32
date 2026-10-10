@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.12.0"
+#define FW_VERSION "0.12.1"
 
 // ---- Broker (EMQX): the login lives in secrets.h, which is not in git ----
 #if __has_include("secrets.h")

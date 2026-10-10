@@ -53,7 +53,7 @@ cd firmware
 
 ## 3. Connect it to Wi-Fi (first boot only, over Bluetooth)
 
-Since firmware 0.12.0 a device with no Wi-Fi saved advertises over Bluetooth as **`SS-XXXX`** (last 4 characters of the device ID). Setting it up needs the code from its QR label, which the serial monitor prints at boot: `QR label: SS:<device id>:<code>`.
+Since firmware 0.12.0 a device with no Wi-Fi saved advertises over Bluetooth as **`SS-XXXX`** (last 4 characters of the device ID). Setting it up needs the code from its QR label, which the serial monitor prints at boot: `QR label: SS:<UID>:<code>`.
 
 - **With our phone app (M5):** scan the label, pick your Wi-Fi, enter the password.
 - **Until then, with Espressif's free "ESP BLE Provisioning" app** (Android / iOS): scan the QR code the serial monitor shows, or pick `SS-XXXX` and type the code. (In the app's settings, clear the device name prefix "PROV_" so it lists `SS-` devices.)

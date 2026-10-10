@@ -157,8 +157,10 @@ void netSetup(const NetHandlers &h) {
   topicOnline = "ss/dev/" + deviceId + "/online";
   inbox = xQueueCreate(64, sizeof(Inbox));
   makePop();
-  Serial.println("Device ID: " + deviceId + "  firmware " FW_VERSION);
-  Serial.println("QR label: SS:" + deviceId + ":" + devicePop);
+  String uid = deviceId.substring(6);  // people see the 12-character UID; "esp32-" stays internal
+  uid.toUpperCase();
+  Serial.println("Device UID: " + uid + "  firmware " FW_VERSION);
+  Serial.println("QR label: SS:" + uid + ":" + devicePop);
 
   // Saved Wi-Fi: connects in the background and never blocks. If the router is
   // down (e.g. still booting after a power cut) the device keeps running and

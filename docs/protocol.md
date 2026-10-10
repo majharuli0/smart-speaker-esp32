@@ -49,8 +49,8 @@ Devices connect to the **MQTT broker** (EMQX Cloud, TLS on port 8883), not to th
 ## 2. Identities
 
 - **Device ID:** `esp32-` + the chip's factory MAC address as 12 lowercase hex characters, e.g. `esp32-2884856409fc`. It never changes for a given chip.
-- **Displayed UID:** the page shows the 12 hex characters in uppercase (`2884856409FC`). Messages always use the full ID.
-- **QR label:** `SS:<device id>:<code>`, where the code is the first 8 hex characters of HMAC-SHA256(`DEVICE_SECRET`, device ID). The secret is in the firmware (`secrets.h`) and the backend (`.env`), so no per-device record is needed. The code is:
+- **UID:** what people see and type: the 12 hex characters in uppercase (`2884856409FC`). The `esp32-` ID is internal (MQTT topics, database, the label code); the API accepts the UID in URLs and when adding a device.
+- **QR label:** `SS:<UID>:<code>`, e.g. `SS:2884856409FC:7f3a91c2`. The code is the first 8 hex characters of HMAC-SHA256(`DEVICE_SECRET`, internal device ID). The secret is in the firmware (`secrets.h`) and the backend (`.env`), so no per-device record is needed. The code is:
   - the **Bluetooth setup code** (proof of possession, Espressif provisioning security 1): the phone can't send Wi-Fi details without it;
   - the **proof of ownership** when adding the device to an account (`POST /api/v1/devices/claim`).
 - **Wi-Fi setup** (firmware 0.12.0+): with no Wi-Fi saved, the device advertises over Bluetooth as `SS-XXXX` (last 4 of the ID, uppercase) until a phone sends the details; then Bluetooth is switched off and its memory freed.

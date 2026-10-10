@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.11.1"
+#define FW_VERSION "0.11.2"
 
 // ---- Broker (EMQX): the login lives in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -54,9 +54,10 @@
 #define SD_SPI_HZ    8000000  // 8 MHz: plenty for audio, reliable over jumper wires
 #define SD_CHECK_MS  5000     // how often to notice a card being inserted or removed
 
-// Live voice from the browser (same 16 kHz mono format as tones)
-#define TALK_BUF_SAMPLES 4096  // 256 ms ring buffer; when full the oldest audio is dropped
-#define TALK_PREBUFFER   1600  // wait for 100 ms of audio before playing, to ride out Wi-Fi hiccups
+// Live voice from the browser (same 16 kHz mono format as tones). It arrives in
+// 125 ms pieces (the cloud broker allows the server only 10 messages a second).
+#define TALK_BUF_SAMPLES 16000  // 1 s ring buffer; when full the oldest audio is dropped
+#define TALK_PREBUFFER   3000   // wait for ~190 ms (2 pieces) before playing, to ride out gaps between pieces
 #define TALK_DRY_MS      150   // no audio for longer than the I2S queue holds → buffer up again
 
 // ---- Updates over Wi-Fi ----

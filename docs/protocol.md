@@ -143,12 +143,13 @@ The server forwards any other browser message to the device named in `target`. I
 ```
 browser: talk_start → binary chunk, chunk, ... → talk_stop
 ```
-- **Format:** raw PCM, 16 kHz, 16-bit signed little-endian, mono. The browser sends **640-byte chunks** (320 samples = 20 ms).
-- **Routing:** the server forwards a browser's binary messages only to its current talk target, and only between `talk_start` and `talk_stop`. Everything else is dropped.
-- **Backpressure:** the server drops a chunk if more than 16,000 bytes (~0.5 s) are already waiting to be sent to that device, so the delay can't keep growing.
-- **Device:**
-  - Holds a 4,096-sample buffer (256 ms). It starts playing once 100 ms are buffered, and drops the oldest audio when the buffer is full.
-  - If no audio arrives for 150 ms, it waits for 100 ms of audio to build up again before resuming.
+- **Format:** raw PCM, 16 kHz, 16-bit signed little-endian, mono. The browser sends **640-byte chunks** (320 samples = 20 ms) over its live connection.
+- **Routing:** the server forwards a browser's audio only to its current talk target, and only between `talk_start` and `talk_stop`. Everything else is dropped.
+- **Pieces of 125 ms:** the server joins the chunks and publishes one message every 125 ms (4,000 bytes, 8 messages a second). EMQX Serverless allows a client only **10 published messages a second**: one message per 20 ms chunk (50 a second) was queued by the broker and fell seconds behind. Any command for the device first sends the audio still waiting, so `talk_stop` always comes after the last words.
+- **No late audio:** the browser sends chunks as "volatile" (dropped if the connection is busy), and audio is QoS 0 (never resent).
+- **Device** (firmware 0.11.2+):
+  - Holds a 16,000-sample buffer (1 s). It starts playing once 3,000 samples (~190 ms, two pieces) are buffered, and drops the oldest audio when the buffer is full.
+  - If no audio arrives for 150 ms, it waits for the buffer to build up again before resuming.
   - On `talk_stop` it plays what's left in the buffer, then stops.
 - **Priority:** an alarm, or a `ring` from the **Test tone** button, stops talk.
 - The mic only works on `https://` or `http://localhost`, a browser rule.

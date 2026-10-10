@@ -50,7 +50,11 @@ Devices connect to the **MQTT broker** (EMQX Cloud, TLS on port 8883), not to th
 
 - **Device ID:** `esp32-` + the chip's factory MAC address as 12 lowercase hex characters, e.g. `esp32-2884856409fc`. It never changes for a given chip.
 - **Displayed UID:** the page shows the 12 hex characters in uppercase (`2884856409FC`). Messages always use the full ID.
-- **Browsers** are anonymous for now: no login, and every browser sees every device.
+- **QR label:** `SS:<device id>:<code>`, where the code is the first 8 hex characters of HMAC-SHA256(`DEVICE_SECRET`, device ID). The secret is in the firmware (`secrets.h`) and the backend (`.env`), so no per-device record is needed. The code is:
+  - the **Bluetooth setup code** (proof of possession, Espressif provisioning security 1): the phone can't send Wi-Fi details without it;
+  - the **proof of ownership** when adding the device to an account (`POST /api/v1/devices/claim`).
+- **Wi-Fi setup** (firmware 0.12.0+): with no Wi-Fi saved, the device advertises over Bluetooth as `SS-XXXX` (last 4 of the ID, uppercase) until a phone sends the details; then Bluetooth is switched off and its memory freed.
+- **Users** log in to the backend (`smart-speaker-backend`); each sees and controls only the devices they've added.
 
 ---
 
@@ -107,7 +111,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"volume", target, value}` | Sets volume 0–100 and saves it on the device, then replies with `volume` |
 | `{type:"volume", target}` | Only asks; the device replies with `volume` |
 | `{type:"partitions", target}` | Asks for the flash layout; the device replies with `partitions` |
-| `{type:"reset_wifi", target}` | Forgets Wi-Fi and restarts into the setup hotspot `LED-Setup-xxxx` |
+| `{type:"reset_wifi"}` | Forgets Wi-Fi and restarts into Bluetooth setup (`SS-XXXX`, firmware 0.12.0+) |
 
 ### 3.5 Server → device (from the server itself)
 

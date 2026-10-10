@@ -71,7 +71,7 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 - [ ] **1.6 Buttons and LED.** Buttons (e.g. GPIO 7, 15, 16): press for stop/snooze, a doorbell button, and a 10 s hold for factory reset. Onboard RGB LED (GPIO 48) states: setup, connecting, online, ringing, error. *(Skipped for now: no buttons fitted yet.)*
 
 **Setup and security**
-- [ ] **1.7 Bluetooth setup (Wi-Fi provisioning).** Espressif's Bluetooth provisioning (`WiFiProv` / `network_provisioning`) with a security code (proof of possession) printed in the QR label. Keep the hotspot as a fallback.
+- [x] **1.7 Bluetooth setup (Wi-Fi provisioning).** Espressif's Bluetooth provisioning (`WiFiProv` / `network_provisioning`, security 1) with a security code (proof of possession) printed in the QR label. Replaces the hotspot (firmware 0.12.0; see APP_PLAN M4).
 - [ ] **1.8 Link device to account (claim).** After Wi-Fi setup, the device sends a one-time claim token, and the backend links it to the user who scanned it.
 - [x] **1.9 Encrypted connections.** Device ↔ broker over TLS (port 8883), verified with the built-in certificate bundle (EMQX Cloud uses DigiCert). The device no longer uses mDNS: it reaches the broker by hostname, and learns the download address from `ss/server/http`. (Downloads from the server are still plain HTTP on the LAN; HTTPS comes with the cloud server in Phase 2.)
 - [x] **1.10 MQTT client.** `esp-mqtt` on `ss/dev/<id>/{cmd,audio,evt,online}` with a last will for offline status; the server bridges the broker to the web page. Incoming messages are queued and handled on the main loop. EMQX Cloud Serverless, free tier, Asia-Pacific.

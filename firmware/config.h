@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.11.2"
+#define FW_VERSION "0.12.0"
 
 // ---- Broker (EMQX): the login lives in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -11,7 +11,10 @@
 #else
 #include "secrets.example.h"  // placeholders: builds, but can't connect
 #endif
-#define SETUP_AP_PREFIX "LED-Setup-"   // Wi-Fi setup hotspot name + last 4 chars of the device ID
+#ifndef DEVICE_SECRET
+#error "Add DEVICE_SECRET to secrets.h: the same value as DEVICE_SECRET in the backend's .env"
+#endif
+#define PROV_NAME_PREFIX "SS-"   // Bluetooth name during Wi-Fi setup + last 4 of the device ID: "SS-09FC"
 
 // ---- Time ----
 #define NTP_SERVER_1 "pool.ntp.org"

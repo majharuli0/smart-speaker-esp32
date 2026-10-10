@@ -48,16 +48,17 @@ cd firmware
 **From the Arduino IDE:**
 
 - Board: **ESP32S3 Dev Module** (esp32 core by Espressif). Board settings are under "Amp wiring" below.
-- Libraries: **WiFiManager** (tzapu), **WebSockets** (Markus Sattler), **ArduinoJson** (v7)
+- Libraries: **ArduinoJson** (v7)
 - Open `firmware/firmware.ino`, upload, Serial Monitor at 115200
 
-## 3. Connect it to Wi-Fi (first boot only)
+## 3. Connect it to Wi-Fi (first boot only, over Bluetooth)
 
-1. On your phone, join the hotspot **`LED-Setup-xxxx`** (last 4 characters of the device ID).
-2. The setup page opens (or go to `192.168.4.1`). Pick your Wi-Fi, enter the password, save.
-3. The device joins your network, finds `led-server.local`, and appears on the web page.
+Since firmware 0.12.0 a device with no Wi-Fi saved advertises over Bluetooth as **`SS-XXXX`** (last 4 characters of the device ID). Setting it up needs the code from its QR label, which the serial monitor prints at boot: `QR label: SS:<device id>:<code>`.
 
-Wi-Fi is saved on the device. The hotspot comes back automatically if the saved network is unreachable, or when you click **Reset Wi-Fi** on the page.
+- **With our phone app (M5):** scan the label, pick your Wi-Fi, enter the password.
+- **Until then, with Espressif's free "ESP BLE Provisioning" app** (Android / iOS): scan the QR code the serial monitor shows, or pick `SS-XXXX` and type the code. (In the app's settings, clear the device name prefix "PROV_" so it lists `SS-` devices.)
+
+Wi-Fi is saved on the device; Bluetooth is switched off once it's set up. **Reset Wi-Fi** (or removing the device from your account) brings it back to Bluetooth setup. Alarms keep working while it waits.
 
 ## Alarms
 

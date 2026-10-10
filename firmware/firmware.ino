@@ -73,7 +73,7 @@ void setup() {
   alarmsSetup();
   netSetup({onConnected, onCommand, onAudio});
   timeSetup();
-  healthWatchdog();  // last: setup may block (first-boot Wi-Fi hotspot, formatting storage)
+  healthWatchdog();  // last: setup may block (formatting storage on first boot)
 }
 
 void loop() {

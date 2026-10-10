@@ -88,6 +88,8 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 
 ---
 
+> **Phases 2–3 are now planned in detail in [APP_PLAN.md](APP_PLAN.md)** (2026-10-10): NestJS + Postgres backend, React web app, Expo app with ESP-IDF Bluetooth provisioning, in separate repos (smart-speaker-backend / -web / -app). Milestones M1–M6 there replace the task lists below.
+
 ## Phase 2: Backend and web (4–6 weeks)
 
 **Goal:** a multi-user cloud backend with one API for both web and app.

@@ -28,7 +28,7 @@ How the ESP32, the server and the web page talk to each other. This is the singl
 
 ## 1b. Devices over MQTT (firmware 0.11.0+)
 
-Devices connect to the **MQTT broker** (EMQX Cloud, TLS on port 8883), not to the server. The server connects to the same broker (`MQTT_URL` in `backend/.env`) and bridges devices to the web page, which still uses the WebSocket. **The JSON messages in section 3 are unchanged; only the route is different.**
+Devices connect to the **MQTT broker**, not to the server. Since firmware 0.13.0 that's **our own EMQX** (open source, in `smart-speaker-backend`'s docker-compose), which asks the backend about every login and topic. (0.11–0.12 used EMQX Cloud Serverless with one shared login; Serverless can't ask our backend.) The server connects to the same broker (`MQTT_URL` in `backend/.env`) and bridges devices to the web page, which still uses the WebSocket. **The JSON messages in section 3 are unchanged; only the route is different.**
 
 | Topic | Direction | QoS | Carries |
 |---|---|---|---|
@@ -40,8 +40,12 @@ Devices connect to the **MQTT broker** (EMQX Cloud, TLS on port 8883), not to th
 | `ss/server/http` | server | 1, retained | Base URL for downloads (tones, firmware), e.g. `http://192.168.0.102:3000`; `PUBLIC_URL` overrides it |
 
 - **The device ID is taken from the topic**, never from the message, so a device can't pose as another.
-- **TLS:** the device checks the broker's certificate against the ESP32's built-in bundle of trusted roots (EMQX Cloud uses DigiCert), so no certificate file is embedded. Certificate dates aren't checked, so it can connect before its clock is set.
-- **Login:** `firmware/secrets.h` (not in git; template `secrets.example.h`) for devices; `MQTT_USERNAME` / `MQTT_PASSWORD` in `backend/.env` for the server.
+- **Login, decided by the backend** (`/api/v1/broker/auth`):
+  - each device logs in **as itself**: username = client ID = its device ID, password = HMAC-SHA256(`DEVICE_SECRET`, `"mqtt:" + id`) in hex. It's not the label code, so the printed label doesn't reveal it;
+  - the backend logs in with `MQTT_USERNAME` / `MQTT_PASSWORD` (its `.env`) and may use every topic;
+  - anything else is refused.
+- **Topics, decided by the backend** (`/api/v1/broker/acl`): a device may only publish its own `evt` and `online`, and only subscribe to its own `cmd` and `audio` plus `ss/server/online` and `ss/server/http`. So one device can't listen to, command, or pose as another.
+- **Address:** `MQTT_URI` in `firmware/secrets.h` (not in git; template `secrets.example.h`): `mqtt://<this computer>:1883` on your own network. On the cloud server it becomes `mqtts://<domain>:8883`, checked against the ESP32's built-in bundle of trusted roots (no certificate file embedded).
 - **Old firmware** (before 0.11.0) still connects by WebSocket, and the server accepts both.
 
 ---

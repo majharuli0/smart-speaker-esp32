@@ -55,6 +55,19 @@ static void makePop() {
   devicePop = hex;
 }
 
+// Our MQTT broker asks the backend about every login: a device logs in as itself
+// (username = client ID = device ID) with HMAC-SHA256(DEVICE_SECRET, "mqtt:" + ID)
+// in hex. Not the label code, so the printed label doesn't reveal it.
+static String mqttPassword() {
+  uint8_t mac[32];
+  String msg = "mqtt:" + deviceId;
+  mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), (const uint8_t *)DEVICE_SECRET, strlen(DEVICE_SECRET),
+                  (const uint8_t *)msg.c_str(), msg.length(), mac);
+  char hex[65];
+  for (int i = 0; i < 32; i++) snprintf(hex + i * 2, 3, "%02x", mac[i]);
+  return hex;
+}
+
 // Wi-Fi setup over Bluetooth (Espressif's provisioning: an encrypted session that
 // needs the code from the QR label). Runs on the event task: only logs and flags.
 static void onProvEvent(arduino_event_t *e) {
@@ -126,13 +139,15 @@ static void onMqttEvent(void *, esp_event_base_t, int32_t id, void *data) {
 }
 
 static void startMqtt() {
-  static String uri = "mqtts://" + String(MQTT_HOST) + ":" + String(MQTT_PORT);
+  static String uri = MQTT_URI;
+  static String password = mqttPassword();
   esp_mqtt_client_config_t cfg = {};
   cfg.broker.address.uri = uri.c_str();
-  cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;  // trusts the broker's public (DigiCert) certificate
+  if (uri.startsWith("mqtts://"))
+    cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;  // a broker with a public certificate
   cfg.credentials.client_id = deviceId.c_str();
-  cfg.credentials.username = MQTT_USERNAME;
-  cfg.credentials.authentication.password = MQTT_PASSWORD;
+  cfg.credentials.username = deviceId.c_str();
+  cfg.credentials.authentication.password = password.c_str();
   cfg.session.keepalive = 30;
   cfg.session.last_will.topic = topicOnline.c_str();
   cfg.session.last_will.msg = "0";

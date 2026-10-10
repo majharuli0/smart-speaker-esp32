@@ -159,7 +159,7 @@ Replaces the one `DEVICE_SECRET` shared by every speaker (a cracked speaker woul
 3. **Family sharing.** The owner invites others by email; roles are owner and member. Members control the speaker; only the owner removes it or manages members.
 4. **Clock without internet.** A DS3231 RTC module (coin cell), so alarms ring after a power cut even when the internet is down. Needs hardware.
 
-### M9 Files on the speaker (replaces "Tones")
+### M9 Files on the speaker (replaces "Tones")  🟡 *built 2026-10-10: firmware 0.15.0, backend (34 tests), web and app (checked in a browser); real-speaker check pending*
 A simple file manager per speaker, in the web and the app:
 - **Storage:** two tabs, **Built-in** (~10 MB) and **SD card**, each with a usage bar. Folders with breadcrumbs.
 - **Actions:** new folder, rename, delete (folders with their contents, after confirming), move between folders and storages, play on the speaker, use as an alarm sound.

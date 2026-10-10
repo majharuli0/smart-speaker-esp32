@@ -2,7 +2,7 @@
 
 How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.11.0` and backend `0.2.0`.
+**Version:** matches firmware `0.11.1` and backend `0.2.0`.
 
 ---
 
@@ -116,6 +116,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"timezone", tz, name}` | On connect, then every hour. `tz` is the POSIX rule the ESP32 uses, `name` the IANA zone. See section 8. |
 | `{type:"alarms_sync", version, alarms:[{id, time, days, date?, tone, enabled}], tones:[{name, size, sha256}]}` | On connect, after any change to this device's alarms, and when a tone they use is re-uploaded. Only its own alarms, plus the tones they use (section 5). |
 | `{type:"talk_stop"}` | The browser that was talking closed its tab or lost its connection |
+| `{type:"watch", on}` | On hello, and whenever the first page opens (`true`) or the last one closes (`false`). Sets the stats rate. |
 | `{type:"ota_start", path, version, size, sha256}` | After a browser's `ota`. See section 9. |
 | `{type:"doorbell"}` | Someone rang: play the ding-dong |
 
@@ -132,7 +133,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"cache", stored, wanted, card}` | How many of its alarms' tones are stored on the device (on the card, built-in, or both), and whether a microSD card is in. After each sync, each finished download, and when a card is inserted or removed. |
 | `{type:"talking"}` / `{type:"talk_stopped"}` | Talk playback starts / ends |
 | `{type:"volume", value}` | On connect, and after any `volume` request |
-| `{type:"stats", ...}` | Every 2 s while connected. See 6.1. |
+| `{type:"stats", ...}` | Every **2 s while a page is open**, otherwise every **5 min** (keeps MQTT traffic low). See 6.1. |
 | `{type:"partitions", ...}` | On connect, and when asked. Measured once at boot. See 6.2. |
 
 ---
@@ -203,7 +204,7 @@ device: saves the list in flash → alarms_ack {version, count}
 
 ## 6. Device reports
 
-### 6.1 `stats` (every 2 s)
+### 6.1 `stats` (every 2 s while a page is open, else every 5 min)
 
 | Field | Meaning |
 |---|---|

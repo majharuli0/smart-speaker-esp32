@@ -51,6 +51,7 @@ static void onCommand(uint8_t *payload, size_t length) {
     sendVolume();
   }
   else if (cmd == "partitions") sendPartitions();
+  else if (cmd == "watch") setWatching(doc["on"] | false);
   else if (cmd == "alarms_sync") { alarmsSync(doc); cacheSync(doc["tones"]); }
   else if (cmd == "timezone") setTimezone(doc["tz"] | "", doc["name"] | "");
   else if (cmd == "doorbell") chimeStart();

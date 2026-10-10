@@ -73,7 +73,7 @@ function connect(server, hello) {
 const device = (server, deviceId, extra = {}) => connect(server, { type: 'hello', role: 'device', deviceId, fw: 'test', ...extra });
 const browser = (server) => connect(server, { type: 'hello', role: 'browser' });
 // Every device is sent these when it connects; they aren't commands
-const ON_CONNECT = ['timezone', 'alarms_sync'];
+const ON_CONNECT = ['timezone', 'alarms_sync', 'watch'];
 const commands = (dev) => dev.messages.filter((m) => !ON_CONNECT.includes(m.type));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

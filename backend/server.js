@@ -191,6 +191,16 @@ const deviceList = () => ({ type: 'devices', devices: [...devices.keys()] });
 // A device's latest status reports, kept so a page opened later still gets them
 const REPLAYED_REPORTS = ['alarms_ack', 'cache', 'volume', 'partitions', 'stats'];
 
+// Devices send stats every 2 s only while a page is open (a heartbeat every
+// 5 min otherwise), which keeps MQTT traffic, and the broker's quota, low.
+const pageOpen = () => [...wss.clients].some((c) => c.role === 'browser' && c.readyState === 1);
+let watching = false;
+function updateWatching() {
+  if (pageOpen() === watching) return;
+  watching = !watching;
+  devices.forEach((_, id) => toDevice(id, { type: 'watch', on: watching }));
+}
+
 function sendTimezone(deviceId) {
   const tz = deviceSettings[deviceId]?.tz || DEFAULT_TZ;
   toDevice(deviceId, { type: 'timezone', tz: posixTz(tz), name: tz });
@@ -289,6 +299,7 @@ function onMessage(ws, raw, isBinary) {
       toBrowsers(deviceList());
       sendTimezone(ws.deviceId);
       syncAlarms(ws.deviceId);
+      toDevice(ws.deviceId, { type: 'watch', on: watching });
     } else {
       ws.send(JSON.stringify(deviceList()));
       ws.send(JSON.stringify(alarmsMessage()));
@@ -296,6 +307,7 @@ function onMessage(ws, raw, isBinary) {
       ws.send(JSON.stringify({ type: 'firmware', firmware: firmwareList() }));
       ws.send(JSON.stringify({ type: 'events', events: events.slice(0, 50) }));
       ws.send(JSON.stringify({ type: 'server', lanUrl: lanUrl() }));
+      updateWatching();
       // Devices send these once (on connect or on change), so replay them for a page opened later
       devices.forEach((dev) => Object.values(dev.lastReports || {}).forEach((m) => ws.send(JSON.stringify(m))));
     }
@@ -360,6 +372,7 @@ function onMessage(ws, raw, isBinary) {
 }
 
 function onClose(ws) {
+  if (ws.role === 'browser') setImmediate(updateWatching); // after the socket has left wss.clients
   if (ws.talkTarget) toDevice(ws.talkTarget, { type: 'talk_stop' }); // tab closed mid-talk
   // Only if this socket is still the registered one (a reconnect may have replaced it)
   if (ws.role === 'device' && devices.get(ws.deviceId) === ws) {

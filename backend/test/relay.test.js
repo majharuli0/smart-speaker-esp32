@@ -82,3 +82,18 @@ test('a page opened later still gets each device\'s latest status reports', asyn
   assert.equal(late.messages.filter((m) => m.type === 'ringing').length, 0);
   dev.close(); early.close(); late.close();
 });
+
+test('devices are told when a page is open, so they only send stats often then', async () => {
+  // Each test file has its own server, but earlier tests here may have left pages open: start clean
+  await sleep(200);
+  const dev = await device(server, 'esp32-watch01');
+  const first = await dev.waitFor((m) => m.type === 'watch');
+  assert.equal(first.on, false, 'no page open yet');
+
+  const page = await browser(server);
+  await dev.waitFor((m) => m.type === 'watch' && m.on === true);
+  page.close();
+  const off = await dev.waitFor((m) => m.type === 'watch' && m.on === false && dev.messages.indexOf(m) > dev.messages.indexOf(first));
+  assert.equal(off.on, false);
+  dev.close();
+});

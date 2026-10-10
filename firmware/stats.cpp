@@ -156,9 +156,16 @@ void sendPartitions() {
   netSend(partitionsJson);
 }
 
+static bool watching = false;
+static unsigned long lastStats = 0;
+
+void setWatching(bool on) {
+  if (on && !watching) lastStats = millis() - STATS_INTERVAL_MS;  // a page just opened: fill it at once
+  watching = on;
+}
+
 void statsLoop() {
-  static unsigned long lastStats = 0;
-  if (netConnected() && millis() - lastStats >= STATS_INTERVAL_MS) {
+  if (netConnected() && millis() - lastStats >= (watching ? STATS_INTERVAL_MS : STATS_IDLE_MS)) {
     lastStats = millis();
     sendStats();
   }

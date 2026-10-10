@@ -384,6 +384,7 @@
               <div class="row">
                 <button data-cmd="bell" title="Ring this device's doorbell (a test ring)">🔔 Ring</button>
                 <a href="${bellLink(id)}" target="_blank" title="The page visitors open (for a QR code at the door)">Visitor link ↗</a>
+                <a href="http://${serverHost}/bell/${encodeURIComponent(id)}/qr" target="_blank" title="Printable QR code for your door">QR code ↗</a>
               </div>
             </div>
             <div>

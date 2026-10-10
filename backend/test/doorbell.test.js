@@ -74,3 +74,12 @@ test('pages are told the server\'s network address for the visitor link', async 
   if (msg.lanUrl !== null) assert.match(msg.lanUrl, /^http:\/\/\d+\.\d+\.\d+\.\d+:\d+$/); // null only with no network
   page.close();
 });
+
+test('a printable QR code page encodes the visitor link', async () => {
+  const res = await fetch(`${server.url}/bell/esp32-0000000000b5/qr`);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.match(html, /<svg/);
+  assert.match(html, /\/bell\.html\?d=esp32-0000000000b5/);
+  assert.equal((await fetch(`${server.url}/bell/not-a-device/qr`)).status, 404);
+});

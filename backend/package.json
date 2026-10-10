@@ -17,6 +17,7 @@
     "express": "^5.2.1",
     "mqtt": "^5.16.0",
     "multicast-dns": "^7.2.5",
+    "qrcode": "^1.5.4",
     "ws": "^8.21.1"
   },
   "devDependencies": {

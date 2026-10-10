@@ -129,6 +129,26 @@ app.post('/firmware', express.raw({ type: () => true, limit: MAX_FIRMWARE }), (r
 app.use('/firmware', express.static(FIRMWARE_DIR, { extensions: false }));
 
 // Visitor page's Ring button. Only real device IDs.
+// Printable QR code for the door: it opens the visitor page for this device.
+// Uses PUBLIC_URL / the LAN address, so a phone (not just this machine) can open it.
+app.get('/bell/:deviceId/qr', async (req, res) => {
+  const id = req.params.deviceId;
+  if (!/^esp32-[0-9a-f]{12}$/.test(id)) return res.status(404).end();
+  const link = `${lanUrl() || `${req.protocol}://${req.get('host')}`}/bell.html?d=${id}`;
+  const svg = await require('qrcode').toString(link, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' });
+  const local = !process.env.PUBLIC_URL;
+  res.type('html').send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Doorbell QR</title>
+<style>body{font-family:system-ui,sans-serif;text-align:center;margin:2rem;color:#111827}
+.qr{width:min(80vw,320px);margin:1rem auto}.qr svg{width:100%;height:auto}
+p{color:#6b7280;max-width:420px;margin:0.5rem auto}button{font:inherit;padding:0.5rem 1rem;border-radius:8px;border:1px solid #e5e7eb;background:#fff;cursor:pointer}
+@media print{button,.note{display:none}}</style></head><body>
+<h1>🔔 Ring the doorbell</h1><p>Scan with your phone camera, then tap Ring.</p>
+<div class="qr">${svg}</div>
+<p class="note" style="font-size:0.85rem;word-break:break-all">${link}</p>
+${local ? '<p class="note">⚠ This link only works on your home Wi-Fi. For visitors on mobile data, the server needs a public address (PUBLIC_URL).</p>' : ''}
+<button onclick="print()">🖨 Print</button></body></html>`);
+});
+
 app.post('/bell/:deviceId', (req, res) => {
   const id = req.params.deviceId;
   if (!/^esp32-[0-9a-f]{12}$/.test(id)) return res.status(404).json({ ok: false, reason: 'unknown' });

@@ -85,7 +85,7 @@ Everything runs locally first (Postgres in Docker) and moves to the cloud later.
 - **Tooling:** Swagger at `/api/docs`; `GET /api/v1/health`; ESLint + Prettier; GitHub Actions running lint + unit + e2e (with a Postgres service).
 - **Done when:** register → login → `me` → refresh → logout works in the e2e tests, and Swagger shows them.
 
-### M2 Devices, MQTT bridge and all current features (backend)  🟡 *code done 2026-10-10 (24 e2e tests); check with the real speaker pending*
+### M2 Devices, MQTT bridge and all current features (backend)  ✅ *done 2026-10-10 (24 e2e tests; verified with the real speaker through EMQX). Talk audio is sent in 125 ms pieces: EMQX Serverless allows 10 messages/s per client.*
 Port `backend/server.js` into Nest modules, reusing its logic and tests as the spec:
 
 | Module | Contents |
@@ -101,7 +101,7 @@ Port `backend/server.js` into Nest modules, reusing its logic and tests as the s
 - **Tests:** port the 49 existing tests (relay, alarms, tones, talk, firmware, doorbell, health, MQTT with aedes) to Jest e2e, adding ownership checks (user B can't see or control user A's device).
 - **Done when:** the real ESP32, unchanged (firmware 0.11.x), connects through EMQX and works fully against the new backend, driven from Swagger/curl.
 
-### M3 Web app (`smart-speaker-web`)  🟡 *code done 2026-10-10 (checked in headless Edge against the test backend); check with the real speaker pending. Kept simpler than planned: plain Tailwind classes and forms, no shadcn/ui or react-hook-form.*
+### M3 Web app (`smart-speaker-web`)  ✅ *done 2026-10-10 (verified with the real speaker). Kept simpler than planned: plain Tailwind classes and forms, no shadcn/ui or react-hook-form.*
 - Vite + React + TS + Tailwind/shadcn; orval-generated hooks from the backend's OpenAPI; an axios instance with Bearer token and **refresh on 401** (fixing the gap noted in seenyor-frontend); a Socket.IO hook for live data.
 - **Pages:**
   - Login / register.
@@ -113,7 +113,7 @@ Port `backend/server.js` into Nest modules, reusing its logic and tests as the s
 - The current `web/index.html` design is the visual reference: white, grouped cards.
 - **Done when:** with two accounts, each sees and controls only their own speaker, and every current feature works.
 
-### M4 Firmware: Bluetooth provisioning (this repo, firmware 0.12.0)
+### M4 Firmware: Bluetooth provisioning (this repo, firmware 0.12.0)  ✅ *done 2026-10-10: firmware 0.12.0, set up with Espressif's app; the label code matches the backend's claim check*
 - Replace the WiFiManager setup hotspot with **`WiFiProv` over BLE**, `WIFI_PROV_SECURITY_1`, PoP = HMAC as above, Bluetooth name `SS-XXXX` (last 4 hex of the ID), freeing Bluetooth memory after provisioning.
 - **Reset Wi-Fi** (and a factory reset) re-enters provisioning.
 - Print the device QR text on the serial port at boot, for development.

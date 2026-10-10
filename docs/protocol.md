@@ -2,7 +2,7 @@
 
 How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.10.0` and backend `0.2.0`.
+**Version:** matches firmware `0.11.0` and backend `0.2.0`.
 
 ---
 
@@ -23,6 +23,26 @@ How the ESP32, the server and the web page talk to each other. This is the singl
 
 - The device looks up `led-server.local` once at boot, and keeps retrying every second until it's found. It then keeps a WebSocket open to that IP, reconnecting every 3 s if it drops.
 - All HTTP responses allow any origin (CORS `*`, header `X-Filename` allowed), so the page also works when opened as a file.
+
+---
+
+## 1b. Devices over MQTT (firmware 0.11.0+)
+
+Devices connect to the **MQTT broker** (EMQX Cloud, TLS on port 8883), not to the server. The server connects to the same broker (`MQTT_URL` in `backend/.env`) and bridges devices to the web page, which still uses the WebSocket. **The JSON messages in section 3 are unchanged; only the route is different.**
+
+| Topic | Direction | QoS | Carries |
+|---|---|---|---|
+| `ss/dev/<id>/cmd` | server → device | 1 | Everything in 3.4 and 3.5 (commands) |
+| `ss/dev/<id>/audio` | server → device | 0 | Talk audio (section 4) |
+| `ss/dev/<id>/evt` | device → server | 1 | Everything the device sends: `hello`, 3.6, `boot` |
+| `ss/dev/<id>/online` | device | 1, retained | `1` on connect; the broker publishes `0` if the device drops (last will) |
+| `ss/server/online` | server | 1, retained | `1` when up (`0` is its last will). On `1`, a device sends `hello` and its reports again. |
+| `ss/server/http` | server | 1, retained | Base URL for downloads (tones, firmware), e.g. `http://192.168.0.102:3000`; `PUBLIC_URL` overrides it |
+
+- **The device ID is taken from the topic**, never from the message, so a device can't pose as another.
+- **TLS:** the device checks the broker's certificate against the ESP32's built-in bundle of trusted roots (EMQX Cloud uses DigiCert), so no certificate file is embedded. Certificate dates aren't checked, so it can connect before its clock is set.
+- **Login:** `firmware/secrets.h` (not in git; template `secrets.example.h`) for devices; `MQTT_USERNAME` / `MQTT_PASSWORD` in `backend/.env` for the server.
+- **Old firmware** (before 0.11.0) still connects by WebSocket, and the server accepts both.
 
 ---
 

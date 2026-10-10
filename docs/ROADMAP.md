@@ -73,8 +73,8 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 **Setup and security**
 - [ ] **1.7 Bluetooth setup (Wi-Fi provisioning).** Espressif's Bluetooth provisioning (`WiFiProv` / `network_provisioning`) with a security code (proof of possession) printed in the QR label. Keep the hotspot as a fallback.
 - [ ] **1.8 Link device to account (claim).** After Wi-Fi setup, the device sends a one-time claim token, and the backend links it to the user who scanned it.
-- [ ] **1.9 Encrypted connections.** WSS/MQTTS verified with the built-in certificate bundle (`esp_crt_bundle`). Connect to a DNS hostname in production; mDNS for development only.
-- [ ] **1.10 MQTT client** (if chosen). `esp-mqtt` with topics `devices/{id}/cmd`, `/state`, `/events` and a last-will message for offline status.
+- [x] **1.9 Encrypted connections.** Device ↔ broker over TLS (port 8883), verified with the built-in certificate bundle (EMQX Cloud uses DigiCert). The device no longer uses mDNS: it reaches the broker by hostname, and learns the download address from `ss/server/http`. (Downloads from the server are still plain HTTP on the LAN; HTTPS comes with the cloud server in Phase 2.)
+- [x] **1.10 MQTT client.** `esp-mqtt` on `ss/dev/<id>/{cmd,audio,evt,online}` with a last will for offline status; the server bridges the broker to the web page. Incoming messages are queued and handled on the main loop. EMQX Cloud Serverless, free tier, Asia-Pacific.
 - [x] **1.11 Updates over Wi-Fi (OTA).** Upload `firmware.ino.bin` on the page; the server reads board + version from a marker in the file and keeps the newest per board. A device updates on request: download, SHA-256 check, image check, restart. The new version must reach the server within 3 min or the bootloader rolls back. Image signing comes with secure boot in 5.4.
 
 **New features**

@@ -130,7 +130,7 @@ static void startDownload(int i, int s) {
   const Tone &t = wanted[i];
   http.setConnectTimeout(TONE_TIMEOUT_MS);
   http.setTimeout(TONE_TIMEOUT_MS);
-  http.begin("http://" + serverAddress().toString() + ":" + String(SERVER_PORT) + "/tones/" + t.name);
+  http.begin(serverHttp() + "/tones/" + t.name);
   if (http.GET() != HTTP_CODE_OK) {
     http.end();
     nextTry = millis() + TONE_RETRY_MS;
@@ -321,7 +321,7 @@ void cacheSync(JsonVariantConst tones) {
 
 void cacheLoop() {
   checkCard();
-  if (WiFi.status() != WL_CONNECTED || serverAddress() == IPAddress(0, 0, 0, 0)) return;
+  if (WiFi.status() != WL_CONNECTED || serverHttp().isEmpty()) return;
 
   if (dl < 0) {
     if ((long)(millis() - nextTry) < 0) return;  // signed difference survives millis() wrapping

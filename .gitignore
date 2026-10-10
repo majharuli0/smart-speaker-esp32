@@ -12,3 +12,6 @@ backend/.env
 
 # Firmware build output (.bin files for updates over Wi-Fi)
 firmware/build/
+
+# Firmware MQTT login (copy firmware/secrets.example.h to firmware/secrets.h)
+firmware/secrets.h

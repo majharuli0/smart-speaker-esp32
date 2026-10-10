@@ -117,7 +117,8 @@ static bool openTone() {
   }
   http.setConnectTimeout(TONE_TIMEOUT_MS);  // don't hang when offline: beep instead
   http.setTimeout(TONE_TIMEOUT_MS);
-  http.begin("http://" + serverAddress().toString() + ":" + String(SERVER_PORT) + "/tones/" + ringingTone);
+  if (serverHttp().isEmpty()) return false;  // download address not known yet (server not seen)
+  http.begin(serverHttp() + "/tones/" + ringingTone);
   feedLoopWDT();  // connect + first data can take up to 2 x TONE_TIMEOUT_MS, near the 5 s watchdog
   if (http.GET() != HTTP_CODE_OK) return false;
   feedLoopWDT();

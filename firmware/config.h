@@ -3,11 +3,14 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.10.0"
+#define FW_VERSION "0.11.0"
 
-// ---- Server ----
-#define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
-#define SERVER_PORT 3000
+// ---- Broker (EMQX): the login lives in secrets.h, which is not in git ----
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#include "secrets.example.h"  // placeholders: builds, but can't connect
+#endif
 #define SETUP_AP_PREFIX "LED-Setup-"   // Wi-Fi setup hotspot name + last 4 chars of the device ID
 
 // ---- Time ----

@@ -80,7 +80,7 @@ void otaStart(JsonDocument &msg) {
 
   HTTPClient http;
   http.setTimeout(10000);
-  http.begin("http://" + serverAddress().toString() + ":" + String(SERVER_PORT) + path);
+  http.begin(serverHttp() + path);
   if (http.GET() != HTTP_CODE_OK || (uint32_t)http.getSize() != size) { http.end(); fail("download failed"); return; }
   if (!Update.begin(size)) { http.end(); fail(Update.errorString()); return; }
 

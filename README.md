@@ -24,6 +24,14 @@ If Windows Firewall asks, allow it (TCP 3000 and UDP 5353 for mDNS). Open `http:
 
 Optional settings (port, data folder, mDNS name) go in `backend/.env`. Copy [backend/.env.example](backend/.env.example) to start.
 
+### Devices over MQTT (EMQX)
+
+Devices connect to an MQTT broker (EMQX Cloud), not to the server. Set it up once:
+
+1. **EMQX Cloud:** create a Serverless deployment (free tier, spend limit 0). Under **Access Control → Authentication**, add a user for the server and one for devices.
+2. **Server:** in `backend/.env`, set `MQTT_URL=mqtts://<address>:8883`, `MQTT_USERNAME` and `MQTT_PASSWORD` (see `.env.example`).
+3. **Firmware:** copy `firmware/secrets.example.h` to `firmware/secrets.h` and fill in the address and the device login. That file stays out of git.
+
 ## 2. Flash the ESP32
 
 **From the command line (recommended).** All board settings and library versions come from [firmware/sketch.yaml](firmware/sketch.yaml), so there are no IDE menus to get wrong. Needs [arduino-cli](https://arduino.github.io/arduino-cli/) (`winget install ArduinoSA.CLI`).

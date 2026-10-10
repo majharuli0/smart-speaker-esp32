@@ -1,6 +1,6 @@
 // ESP32 smart speaker firmware. Startup, the main loop, and what each
 // command from the server does. The work lives in the modules:
-//   net    - device ID, Wi-Fi setup, finding the server, WebSocket
+//   net    - device ID, Wi-Fi setup, the MQTT link to the broker (EMQX)
 //   audio  - speaker, volume, ringing tones, live talk
 //   stats  - RAM/CPU/Wi-Fi stats and the flash layout for the web page
 //   timesync - real time from NTP, in the device's time zone

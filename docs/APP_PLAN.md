@@ -76,7 +76,7 @@ Everything runs locally first (Postgres in Docker) and moves to the cloud later.
 
 ## Milestones (one at a time; each ends working, tested and committed)
 
-### M1 Backend skeleton (`smart-speaker-backend`)
+### M1 Backend skeleton (`smart-speaker-backend`)  ✅ *done 2026-10-10 (local repo `E:LED Projectsmart-speaker-backend`, 7 e2e tests)*
 - Nest app with:
   - the conventions above;
   - `docker-compose.yml` (postgres:16 + the app), `.env.example`;

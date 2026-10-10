@@ -23,12 +23,10 @@ fs.mkdirSync(FIRMWARE_DIR, { recursive: true });
 // ---- Doorbell ----
 // Rung from the owner's page or the visitor page (web/bell.html). The device
 // plays a built-in ding-dong; every ring is logged and shown on the pages.
-const BELL_COOLDOWN_MS = 10000; // one ring per device per 10 s: stops button mashing
 const MAX_EVENTS = 100;
 let events = [];
 try { events = JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf8')); } catch {}
 const saveEvents = () => fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2));
-const lastBell = {}; // deviceId -> ms of the last accepted ring
 
 // Doorbell rings and device restarts: saved newest-first and announced to pages
 function logEvent(event) {
@@ -39,9 +37,6 @@ function logEvent(event) {
 
 function ringDoorbell(deviceId, source) {
   const now = Date.now();
-  const since = now - (lastBell[deviceId] || 0);
-  if (since < BELL_COOLDOWN_MS) return { ok: false, reason: 'cooldown', retryIn: Math.ceil((BELL_COOLDOWN_MS - since) / 1000) };
-  lastBell[deviceId] = now;
   const delivered = toDevice(deviceId, { type: 'doorbell' });
   logEvent({ type: 'doorbell', deviceId, source, at: new Date(now).toISOString(), delivered });
   console.log(`Doorbell ${deviceId} (${source}): ${delivered ? 'rang' : 'device offline'}`);
@@ -133,12 +128,12 @@ app.post('/firmware', express.raw({ type: () => true, limit: MAX_FIRMWARE }), (r
 });
 app.use('/firmware', express.static(FIRMWARE_DIR, { extensions: false }));
 
-// Visitor page's Ring button. Only real device IDs; the cooldown limits spam.
+// Visitor page's Ring button. Only real device IDs.
 app.post('/bell/:deviceId', (req, res) => {
   const id = req.params.deviceId;
   if (!/^esp32-[0-9a-f]{12}$/.test(id)) return res.status(404).json({ ok: false, reason: 'unknown' });
   const result = ringDoorbell(id, 'visitor');
-  res.status(result.ok ? 200 : result.reason === 'cooldown' ? 429 : 503).json(result);
+  res.status(result.ok ? 200 : 503).json(result);
 });
 
 // PORT=0 picks a free port (tests use this); log the real one

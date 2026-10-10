@@ -59,7 +59,7 @@ If a device reconnects before its old connection closes, the new connection repl
 | `{type:"events", events:[Event, ...]}` | On browser hello: the newest 50 events (doorbell rings and device restarts) |
 | `{type:"event", event:Event}` | A new event: a doorbell ring `{type:"doorbell", deviceId, source:"visitor"\|"page", at, delivered}` or a restart `{type:"boot", deviceId, reason, fw, crash?, at}` |
 | `{type:"server", lanUrl}` | On browser hello: this server's network address (`http://192.168.x.x:3000`), for links other devices open. `null` if it has no network. |
-| `{type:"doorbell_result", deviceId, ok:false, reason, retryIn?}` | Only to a page whose `doorbell_ring` was refused: `cooldown` or `offline` |
+| `{type:"doorbell_result", deviceId, ok:false, reason:"offline"}` | Only to a page whose `doorbell_ring` couldn't reach the device |
 
 ### 3.3 Browser → server (handled by the server, not relayed)
 
@@ -70,7 +70,7 @@ If a device reconnects before its old connection closes, the new connection repl
 | `{type:"talk_start", target}` | Starts a talk session if nobody else is talking to `target` and it's online. Otherwise replies with `talk_denied`. On success it's also relayed to the device. |
 | `{type:"talk_stop", target}` | Ends the session; also relayed to the device |
 | `{type:"ota", target}` | Update `target` to the newest firmware for its board: sends it `ota_start`. If there's no file for its board, or it's offline, replies `{type:"ota", deviceId, state:"failed", error}`. |
-| `{type:"doorbell_ring", target}` | Ring that device's doorbell (the page's 🔔 button). Same rules as the visitor page (section 10). |
+| `{type:"doorbell_ring", target}` | Ring that device's doorbell (the page's 🔔 button). See section 10. |
 | `{type:"set_timezone", target, tz}` | Saves an IANA zone name (e.g. `Asia/Dhaka`) for that device and sends it a `timezone`. Unknown names are ignored. |
 
 ### 3.4 Browser → device (relayed as-is to `target`)
@@ -262,7 +262,7 @@ device: saves the list in flash → alarms_ack {version, count}
 ## 10. Doorbell
 
 - **Ringing:** from the owner's page (`doorbell_ring`) or the visitor page (`POST /bell/<deviceId>`, opened from a link or QR code at the door). Only real device IDs (`esp32-` + 12 hex) are accepted.
-- **Cooldown:** one ring per device per **10 s**. Extra rings get `429` / `doorbell_result` with `retryIn` (seconds), and the visitor page disables its button for that long.
+- **No cooldown:** every press rings. A press during the ding-dong starts it again.
 - **Device:** `doorbell` plays a built-in **ding-dong**: two bell strikes, E5 then C5, about 2 s, at the device's volume. It's generated in code, so it needs no file or network. It's skipped if an alarm or talk is already playing.
 - **Log:** every ring, delivered or not, is saved newest-first in `events.json` (`DATA_DIR`, last 100) and announced to all pages as `event`. Pages show the last 3 per device. A visitor's ring shows a banner and changes the tab title, plus a system notification if the page was allowed to send them (asked on the first 🔔 button press).
 - **Not yet:** a physical button and ringing over Bluetooth (roadmap 1.6 / 1.12).

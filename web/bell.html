@@ -29,18 +29,16 @@
   btn.onclick = async () => {
     btn.disabled = true;
     msg.textContent = 'Ringing…';
-    let wait = 10;
     try {
       const res = await fetch(`/bell/${encodeURIComponent(deviceId)}`, { method: 'POST' });
       const data = await res.json();
       if (data.ok) msg.textContent = '✓ The bell rang. Someone will be with you shortly.';
-      else if (data.reason === 'cooldown') { wait = data.retryIn; msg.textContent = 'Already rang. Please wait a moment.'; }
       else if (data.reason === 'offline') msg.textContent = 'The doorbell is offline right now, sorry. Please knock.';
       else msg.textContent = 'This doorbell link is not valid.';
     } catch {
       msg.textContent = 'Could not reach the doorbell. Please knock.';
     }
-    setTimeout(() => { btn.disabled = !deviceId; }, wait * 1000);  // matches the server's 10 s cooldown
+    btn.disabled = !deviceId;
   };
 </script>
 </body>

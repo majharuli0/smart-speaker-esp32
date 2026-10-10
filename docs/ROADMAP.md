@@ -78,7 +78,7 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 - [x] **1.11 Updates over Wi-Fi (OTA).** Upload `firmware.ino.bin` on the page; the server reads board + version from a marker in the file and keeps the newest per board. A device updates on request: download, SHA-256 check, image check, restart. The new version must reach the server within 3 min or the bootloader rolls back. Image signing comes with secure boot in 5.4.
 
 **New features**
-- [x] **1.12 Doorbell (web).** 🔔 button on the owner's page and a visitor page (`bell.html?d=<id>`, for a QR code at the door). The device plays the built-in ding-dong; 10 s cooldown; every ring is logged and shown, with a banner and an optional system notification. **Still to do:** a physical button (with 1.6) and ringing over Bluetooth.
+- [x] **1.12 Doorbell (web).** 🔔 button on the owner's page and a visitor page (`bell.html?d=<id>`, for a QR code at the door). The device plays the built-in ding-dong (no cooldown: every press rings); every ring is logged and shown, with a banner and an optional system notification. **Still to do:** a physical button (with 1.6) and ringing over Bluetooth.
 - [ ] **1.13 Microphone.** INMP441 on the second I2S port. Streams from the device to the browser so the owner can answer the doorbell, and is the base for voice commands.
 
 **Reliability**

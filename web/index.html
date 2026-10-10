@@ -126,7 +126,7 @@
         $('notice').textContent = `⚠ ${uidOf(msg.event.deviceId)} restarted after a ${BAD_RESTARTS[msg.event.reason]}.`;
       }
     } else if (msg.type === 'doorbell_result') {
-      setStatus(msg.deviceId, msg.reason === 'cooldown' ? `🔔 just rang; wait ${Number(msg.retryIn) || 10} s` : '🔔 doorbell: device offline');
+      setStatus(msg.deviceId, '🔔 doorbell: device offline');
     } else if (msg.type === 'ota') {
       const text = {
         downloading: `⬇ updating firmware ${Number(msg.progress) || 0}%`,

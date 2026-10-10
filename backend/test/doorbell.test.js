@@ -1,4 +1,4 @@
-// Doorbell: ringing from the owner's page and the visitor page, cooldown, log
+// Doorbell: ringing from the owner's page and the visitor page, and the log
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { startServer, device, browser, online, sleep, tempDir } = require('./helpers');
@@ -22,7 +22,7 @@ test('the page button rings the device and every page hears about it', async () 
   dev.close(); owner.close(); other.close();
 });
 
-test('the visitor page rings it; a second ring within 10 s is refused', async () => {
+test('the visitor page rings it, every time it is pressed (no cooldown)', async () => {
   const id = 'esp32-0000000000b2';
   const dev = await device(server, id);
   const owner = await browser(server);
@@ -34,13 +34,10 @@ test('the visitor page rings it; a second ring within 10 s is refused', async ()
   const ev = await owner.waitFor((m) => m.type === 'event' && m.event.deviceId === id);
   assert.equal(ev.event.source, 'visitor');
 
-  const second = await ringAsVisitor(id);
-  assert.equal(second.status, 429);
-  const body = await second.json();
-  assert.equal(body.reason, 'cooldown');
-  assert.ok(body.retryIn >= 1 && body.retryIn <= 10);
+  assert.equal((await ringAsVisitor(id)).status, 200);
+  assert.equal((await ringAsVisitor(id)).status, 200);
   await sleep(100);
-  assert.equal(dev.messages.filter((m) => m.type === 'doorbell').length, 1);
+  assert.equal(dev.messages.filter((m) => m.type === 'doorbell').length, 3);
   dev.close(); owner.close();
 });
 

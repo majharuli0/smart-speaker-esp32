@@ -4,10 +4,11 @@
 // placeholders, but it can't connect.
 #pragma once
 
-// Our MQTT broker (EMQX in smart-speaker-backend's docker-compose.yml). On your
-// own network: this computer's address. On the cloud server: "mqtts://<domain>:8883".
+// Our MQTT broker (EMQX in smart-speaker-backend's docker-compose.yml). On your own
+// network: "speaker-server.local", the name the backend answers to (mDNS), so the
+// computer's address can change. On the cloud server: "mqtts://<domain>:8883".
 // Each device logs in with its own ID and a password derived from DEVICE_SECRET.
-#define MQTT_URI "mqtt://192.168.0.10:1883"
+#define MQTT_URI "mqtt://speaker-server.local:1883"
 
 // Same as DEVICE_SECRET in the backend's .env. Each device's QR label code is
 // HMAC-SHA256(DEVICE_SECRET, device ID): it unlocks Bluetooth Wi-Fi setup and

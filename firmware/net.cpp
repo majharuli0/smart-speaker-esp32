@@ -1,6 +1,7 @@
 #include "net.h"
 #include <WiFi.h>
 #include <WiFiProv.h>
+#include <ESPmDNS.h>
 #include "mqtt_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_wifi.h"
@@ -138,11 +139,37 @@ static void onMqttEvent(void *, esp_event_base_t, int32_t id, void *data) {
   }
 }
 
-static void startMqtt() {
-  static String uri = MQTT_URI;
+// The broker's address. With "mqtt://speaker-server.local:1883" the computer
+// running the backend is looked up by name on the local network (mDNS; the
+// backend answers it), so it doesn't matter which address the router gives
+// that computer. Any other host (a domain, an IP) is used as it is.
+// Returns "" while the name can't be found.
+static String brokerUri() {
+  String uri = MQTT_URI;
+  int start = uri.indexOf("://") + 3;
+  int end = uri.indexOf(':', start);
+  if (end < 0) end = uri.length();
+  String host = uri.substring(start, end);
+  if (!host.endsWith(".local")) return uri;
+  static bool mdnsUp = false;
+  if (!mdnsUp) mdnsUp = MDNS.begin("ss-" + deviceId.substring(deviceId.length() - 4));
+  IPAddress ip = MDNS.queryHost(host.substring(0, host.length() - 6), 1500);  // blocks up to 1.5 s
+  if (ip == IPAddress()) return "";
+  return uri.substring(0, start) + ip.toString() + uri.substring(end);
+}
+
+static String brokerAt;  // the resolved address in use
+
+static bool startMqtt() {
+  String uri = brokerUri();
+  if (uri.isEmpty()) {
+    Serial.println("Broker " MQTT_URI " not found on the network yet, trying again shortly");
+    return false;
+  }
+  brokerAt = uri;
   static String password = mqttPassword();
   esp_mqtt_client_config_t cfg = {};
-  cfg.broker.address.uri = uri.c_str();
+  cfg.broker.address.uri = brokerAt.c_str();
   if (uri.startsWith("mqtts://"))
     cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;  // a broker with a public certificate
   cfg.credentials.client_id = deviceId.c_str();
@@ -161,6 +188,7 @@ static void startMqtt() {
   esp_mqtt_client_register_event(mqtt, MQTT_EVENT_ANY, onMqttEvent, nullptr);
   esp_mqtt_client_start(mqtt);  // connects, and reconnects by itself whenever needed
   Serial.println("Connecting to the broker " + uri);
+  return true;
 }
 
 void netSetup(const NetHandlers &h) {
@@ -200,7 +228,27 @@ void netLoop() {
   if (wifiUp != wifiWasUp) {
     wifiWasUp = wifiUp;
     Serial.println(wifiUp ? "Wi-Fi connected, IP: " + WiFi.localIP().toString() : String("Wi-Fi lost, reconnecting..."));
-    if (wifiUp && !mqtt) startMqtt();  // once; the client handles every reconnect after that
+  }
+
+  // Start the MQTT client once the broker is found (the client handles every
+  // reconnect after that). If the broker stays unreachable, look its name up
+  // again: the computer may have been given a new address.
+  static unsigned long lastLookup = 0, downSince = 0;
+  bool due = !lastLookup || millis() - lastLookup > 10000;
+  if (wifiUp && !mqtt && due) {
+    lastLookup = millis();
+    startMqtt();
+  }
+  if (brokerUp || !mqtt) downSince = 0;
+  else if (!downSince) downSince = millis();
+  if (wifiUp && downSince && millis() - downSince > 30000 && millis() - lastLookup > 30000) {
+    lastLookup = millis();
+    String uri = brokerUri();
+    if (uri.length() && uri != brokerAt) {
+      brokerAt = uri;
+      esp_mqtt_client_set_uri(mqtt, brokerAt.c_str());  // used from the next reconnect
+      Serial.println("Broker moved: " + brokerAt);
+    }
   }
   // Low latency for talk audio. Not allowed while Bluetooth is on (they share the radio).
   static bool sleepOff = false;

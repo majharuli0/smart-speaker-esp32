@@ -22,8 +22,9 @@ The rest of the system lives in its own repos:
 ## 1. Secrets
 
 Copy `firmware/secrets.example.h` to `firmware/secrets.h` (not in git) and set:
-- `MQTT_URI`: the broker, e.g. `mqtt://192.168.0.110:1883` (the computer running the backend's
-  `docker compose`). Each speaker logs in as itself; the backend checks it.
+- `MQTT_URI`: the broker. At home: `mqtt://speaker-server.local:1883`. The computer running the
+  backend's `docker compose` answers to that name (mDNS), so its address can change. In the cloud:
+  `mqtts://<domain>:8883`. Each speaker logs in as itself, and the backend checks it.
 - `DEVICE_SECRET`: the same value as `DEVICE_SECRET` in the backend's `.env`. It produces each speaker's
   QR label code and its MQTT password.
 

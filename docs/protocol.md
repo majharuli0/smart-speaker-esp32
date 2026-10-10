@@ -47,7 +47,7 @@ Devices connect to the **MQTT broker**, not to the server. Since firmware 0.13.0
   - the backend logs in with `MQTT_USERNAME` / `MQTT_PASSWORD` (its `.env`) and may use every topic;
   - anything else is refused.
 - **Topics, decided by the backend** (`/api/v1/broker/acl`): a device may only publish its own `evt` and `online`, and only subscribe to its own `cmd` and `audio` plus `ss/server/online` and `ss/server/http`. So one device can't listen to, command, or pose as another.
-- **Address:** `MQTT_URI` in `firmware/secrets.h` (not in git; template `secrets.example.h`): `mqtt://<this computer>:1883` on your own network. On the cloud server it becomes `mqtts://<domain>:8883`, checked against the ESP32's built-in bundle of trusted roots (no certificate file embedded).
+- **Address:** `MQTT_URI` in `firmware/secrets.h` (not in git; template `secrets.example.h`). On your own network: `mqtt://speaker-server.local:1883`. The backend answers that name over mDNS with its computer's current address. The device looks it up before connecting, and again if the broker has been unreachable for 30 s (firmware 0.13.1+), so the computer's address may change. On the cloud server it becomes `mqtts://<domain>:8883`, checked against the ESP32's built-in bundle of trusted roots (no certificate file embedded).
 - **Old firmware** (before 0.11.0) still connects by WebSocket, and the server accepts both.
 
 ---

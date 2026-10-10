@@ -101,7 +101,7 @@ Port `backend/server.js` into Nest modules, reusing its logic and tests as the s
 - **Tests:** port the 49 existing tests (relay, alarms, tones, talk, firmware, doorbell, health, MQTT with aedes) to Jest e2e, adding ownership checks (user B can't see or control user A's device).
 - **Done when:** the real ESP32, unchanged (firmware 0.11.x), connects through EMQX and works fully against the new backend, driven from Swagger/curl.
 
-### M3 Web app (`smart-speaker-web`)
+### M3 Web app (`smart-speaker-web`)  🟡 *code done 2026-10-10 (checked in headless Edge against the test backend); check with the real speaker pending. Kept simpler than planned: plain Tailwind classes and forms, no shadcn/ui or react-hook-form.*
 - Vite + React + TS + Tailwind/shadcn; orval-generated hooks from the backend's OpenAPI; an axios instance with Bearer token and **refresh on 401** (fixing the gap noted in seenyor-frontend); a Socket.IO hook for live data.
 - **Pages:**
   - Login / register.

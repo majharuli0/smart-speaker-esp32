@@ -166,7 +166,9 @@ A simple file manager per speaker, in the web and the app:
 - **Upload** any audio into the current folder and storage. The server converts it to 16 kHz mono WAV (limit raised to ~10 min per file, ~1.9 MB/min); the speaker downloads it into place and reports progress.
 - **The speaker's storage is the truth.** The speaker reports its file list; the backend keeps the last known list, so it can be shown while the speaker is offline. Changes need the speaker online. Paths are checked on both sides (no `..`).
 - **Alarms** point to a file on the speaker. A missing file falls back to the built-in chime. Alarm-tone storage moves to a hidden folder users can't touch.
-- **Removed:** the account-wide Tones library on the server. To use a sound on two speakers, upload it to each.
+- **Sounds belong to users:** a user's uploads are only visible to that user (and the people they share the speaker with, M8.3).
+- **Built-in tones for everyone:** a set of default alarm, chime and doorbell sounds that every user gets, read-only. They're on every speaker from the factory (firmware/built-in storage) and listed in every account, so a new speaker can ring a nice alarm before anything is uploaded.
+- **Removed:** the account-wide Tones library on the server. To use your own sound on two speakers, upload it to each.
 - **Later:** MP3 playback on the speaker (about 8× more audio in the same space).
 
 ### Hardware to add (next parts order)

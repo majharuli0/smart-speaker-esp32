@@ -1,6 +1,5 @@
-# Runs on every push and pull request:
-#   backend  - the backend tests (npm test)
-#   firmware - compiles the ESP32-S3 firmware, using firmware/sketch.yaml
+# Runs on every push and pull request: compiles the ESP32-S3 firmware, using
+# firmware/sketch.yaml (with secrets.example.h, since secrets.h isn't in git)
 name: CI
 
 on:
@@ -8,22 +7,6 @@ on:
   pull_request:
 
 jobs:
-  backend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-      - run: npm ci
-      - run: npm run check
-      - run: npm test
-
   firmware:
     runs-on: ubuntu-latest
     steps:

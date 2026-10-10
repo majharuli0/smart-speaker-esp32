@@ -140,7 +140,7 @@ Port `backend/server.js` into Nest modules, reusing its logic and tests as the s
 - **Pushes for:** doorbell ring, missed alarm, device offline for more than 10 min, crash restart.
 
 ### Then
-- Retire `backend/` and `web/` from this repo, once the new backend + web reach parity (M2–M3) and the data has been migrated.
+- ✅ Retire `backend/` and `web/` from this repo, once the new backend + web reach parity (M2–M3) and the data has been migrated. *(done 2026-10-10; they're in git history)*
 - Cloud deployment (Oracle VM: docker compose + Caddy for HTTPS) when it's available again.
 
 ## What we'll reuse (with paths)

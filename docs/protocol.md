@@ -1,8 +1,10 @@
 # Protocol
 
-How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
+How the ESP32 and the server talk to each other (over MQTT, through our broker). This is the single reference for the device side: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.11.1` and backend `0.2.0`.
+**Version:** matches firmware `0.13.0` and `smart-speaker-backend`.
+
+> The web page and phone app no longer talk to devices through a WebSocket: they use the backend's REST API and Socket.IO (see the `smart-speaker-backend` README and its Swagger docs at `/api/docs`). The device messages below are unchanged; where a section mentions the browser or `target`, the backend now sends that message on the user's behalf, after checking they own the device.
 
 ---
 

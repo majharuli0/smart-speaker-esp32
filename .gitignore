@@ -1,17 +1,5 @@
-node_modules
-
-# Runtime data the server creates locally: alarms and uploaded tones
-backend/alarms.json
-backend/tones/
-backend/devices.json
-backend/firmware/
-backend/events.json
-
-# Local backend settings (copy from backend/.env.example)
-backend/.env
-
 # Firmware build output (.bin files for updates over Wi-Fi)
 firmware/build/
 
-# Firmware MQTT login (copy firmware/secrets.example.h to firmware/secrets.h)
+# Firmware secrets: broker address and device secret (copy firmware/secrets.example.h to firmware/secrets.h)
 firmware/secrets.h

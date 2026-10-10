@@ -1,81 +1,63 @@
-# ESP32 Smart Speaker
+# ESP32 Smart Speaker: firmware
 
-An ESP32-S3 speaker controlled from the browser: custom alarms, hold-to-talk, volume and device health. It joins Wi-Fi, finds the local server on its own, and shows up on the web page. See [docs/ROADMAP.md](docs/ROADMAP.md) for the plan to production.
+Firmware and product docs for an ESP32-S3 smart speaker: alarms with your own tones (they ring even
+without internet), a doorbell, hold-to-talk, volume, device health, updates over Wi-Fi, and Wi-Fi setup
+over Bluetooth. See [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/APP_PLAN.md](docs/APP_PLAN.md).
+
+The rest of the system lives in its own repos:
+
+| Repo | What |
+|---|---|
+| **smart-speaker-esp32** (this one) | Firmware, hardware notes, product docs, the device protocol |
+| [smart-speaker-backend](https://github.com/majharuli0/smart-speaker-backend) | NestJS API + Postgres, accounts, and the MQTT broker (EMQX) the speakers connect to |
+| [smart-speaker-web](https://github.com/majharuli0/smart-speaker-web) | React web app |
+| [smart-speaker-app](https://github.com/majharuli0/smart-speaker-app) | Expo (React Native) phone app: adds a speaker by its QR label and Bluetooth |
 
 ```
-├── firmware/               ESP32 program: firmware.ino (startup + commands), net, audio, stats, config.h
-├── backend/server.js       Express + WebSocket relay, alarm scheduler, tones, mDNS for led-server.local
-├── web/                    Web page (index.html) and mic processor (mic-worklet.js)
-├── hardware/               Schematics and enclosure (later)
-└── docs/                   Roadmap; archive/ holds the earlier design doc
+├── firmware/    ESP32 program: firmware.ino (startup + commands), net, audio, alarms, tonecache, ota, health, stats, config.h
+├── hardware/    Schematics and enclosure (later)
+└── docs/        Roadmap, app plan, protocol; archive/ holds the earlier design doc
 ```
 
-The earlier SPI-flash sound storage and the `format_flash` sketch are in git history (commit `340a074`).
+## 1. Secrets
 
-## 1. Start the server
-
-```bash
-cd backend
-npm install
-npm start        # or: npm run dev  (restarts automatically when server.js changes)
-```
-
-If Windows Firewall asks, allow it (TCP 3000 and UDP 5353 for mDNS). Open `http://localhost:3000`.
-
-Optional settings (port, data folder, mDNS name) go in `backend/.env`. Copy [backend/.env.example](backend/.env.example) to start.
-
-### Devices over MQTT (EMQX)
-
-Devices connect to an MQTT broker (EMQX Cloud), not to the server. Set it up once:
-
-1. **EMQX Cloud:** create a Serverless deployment (free tier, spend limit 0). Under **Access Control → Authentication**, add a user for the server and one for devices.
-2. **Server:** in `backend/.env`, set `MQTT_URL=mqtts://<address>:8883`, `MQTT_USERNAME` and `MQTT_PASSWORD` (see `.env.example`).
-3. **Firmware:** copy `firmware/secrets.example.h` to `firmware/secrets.h` and fill in the address and the device login. That file stays out of git.
+Copy `firmware/secrets.example.h` to `firmware/secrets.h` (not in git) and set:
+- `MQTT_URI`: the broker, e.g. `mqtt://192.168.0.110:1883` (the computer running the backend's
+  `docker compose`). Each speaker logs in as itself; the backend checks it.
+- `DEVICE_SECRET`: the same value as `DEVICE_SECRET` in the backend's `.env`. It produces each speaker's
+  QR label code and its MQTT password.
 
 ## 2. Flash the ESP32
 
-**From the command line (recommended).** All board settings and library versions come from [firmware/sketch.yaml](firmware/sketch.yaml), so there are no IDE menus to get wrong. Needs [arduino-cli](https://arduino.github.io/arduino-cli/) (`winget install ArduinoSA.CLI`).
+All board settings and library versions come from [firmware/sketch.yaml](firmware/sketch.yaml). Needs
+[arduino-cli](https://arduino.github.io/arduino-cli/) (`winget install ArduinoSA.CLI`).
 
 ```bash
 cd firmware
-./fw.sh build                 # compile for the ESP32-S3
+./fw.sh build                 # compile for the ESP32-S3 → build/s3/firmware.ino.bin
 ./fw.sh upload COM11          # compile + upload (use your port)
 ./fw.sh monitor COM11         # serial monitor at 115200, Ctrl+C to quit
 ```
 
-**Over Wi-Fi (once a board runs firmware 0.6.0 or later):** run `./fw.sh build`, upload `firmware/build/s3/firmware.ino.bin` in the page's **Firmware** section, then press **Update** on the device. If the new version can't reach the server within 3 minutes, the device goes back to the previous one by itself.
+**Over Wi-Fi:** upload `firmware/build/s3/firmware.ino.bin` on the web app's **Firmware** page (admins),
+then press **Update** under the speaker's Health. If the new version can't reach the server within
+3 minutes, the device goes back to the previous one by itself.
 
-**From the Arduino IDE:**
+At boot the serial monitor prints the speaker's UID and its label text: `QR label: SS:<UID>:<code>`.
 
-- Board: **ESP32S3 Dev Module** (esp32 core by Espressif). Board settings are under "Amp wiring" below.
-- Libraries: **ArduinoJson** (v7)
-- Open `firmware/firmware.ino`, upload, Serial Monitor at 115200
+## 3. Wi-Fi setup (over Bluetooth)
 
-## 3. Connect it to Wi-Fi (first boot only, over Bluetooth)
+A speaker with no Wi-Fi saved advertises over Bluetooth as **`SS-XXXX`** (last 4 characters of its UID)
+and needs the code from its QR label.
 
-Since firmware 0.12.0 a device with no Wi-Fi saved advertises over Bluetooth as **`SS-XXXX`** (last 4 characters of the device ID). Setting it up needs the code from its QR label, which the serial monitor prints at boot: `QR label: SS:<UID>:<code>`.
+- **Phone app:** *Add a speaker* → scan the label → pick your Wi-Fi → password. It's added to your account.
+- **For testing, Espressif's "ESP BLE Provisioning" app:** scan the QR code the serial monitor shows (in
+  the app's settings, clear the device name prefix "PROV_").
 
-- **With our phone app (M5):** scan the label, pick your Wi-Fi, enter the password.
-- **Until then, with Espressif's free "ESP BLE Provisioning" app** (Android / iOS): scan the QR code the serial monitor shows, or pick `SS-XXXX` and type the code. (In the app's settings, clear the device name prefix "PROV_" so it lists `SS-` devices.)
+Bluetooth is switched off once Wi-Fi is set up. **Reset Wi-Fi**, or removing the speaker from your
+account, brings it back to Bluetooth setup. Alarms keep working while it waits.
 
-Wi-Fi is saved on the device; Bluetooth is switched off once it's set up. **Reset Wi-Fi** (or removing the device from your account) brings it back to Bluetooth setup. Alarms keep working while it waits.
-
-## Alarms
-
-1. Under **Tones**, upload any audio file. The browser converts it to 16 kHz mono WAV (first 30 s) before uploading, so the ESP32 needs no decoder.
-2. On a device card, pick a time, weekdays and a tone, then click **Add alarm**. **Test tone** plays it right away.
-3. At that time the server sends `ring` to the device. The device streams the tone from `http://<server>:3000/tones/<name>` and loops it until **Stop** is pressed, or for 1 minute at most.
-
-The server holds the schedule (`backend/alarms.json`), so it must be running when an alarm is due. Each alarm stores the browser's timezone, so it rings at the right local time even if the server runs on UTC.
-
-## Hold to talk
-
-Press and hold **Hold to talk** on a device card and speak. Your voice plays on the device's speaker about 0.3 s later.
-
-- **Mic access:** browsers allow the microphone only on `https://` or `http://localhost`. Use `http://localhost:3000` on the laptop running the server. From another machine on your network, the mic is blocked until the server has HTTPS.
-- **Format:** the page sends 16 kHz 16-bit mono PCM in 20 ms binary WebSocket messages. The device buffers 100 ms before playing, to ride out Wi-Fi hiccups.
-- **Priority:** an alarm going off interrupts talk.
-- **Browser:** use Chrome or Edge. Firefox can't capture the mic into a 16 kHz audio context.
+## Hardware
 
 Board: **ESP32-S3-WROOM-1 N16R8** (16 MB flash, 8 MB PSRAM). The firmware only builds for this board.
 
@@ -100,10 +82,13 @@ microSD card module (SPI, powered from **3V3** unless the module has its own reg
 | VCC | 3V3 |
 | GND | GND |
 
-Arduino IDE settings (`./fw.sh` sets these for you): Board **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM **OPI PSRAM**, Partition Scheme **16M Flash (3MB APP/9.9MB FATFS)**, upload through the USB-C port labelled **COM**.
+Arduino IDE settings, if not using `./fw.sh`: Board **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM
+**OPI PSRAM**, Partition Scheme **16M Flash (3MB APP/9.9MB FATFS)**, library **ArduinoJson** (v7),
+upload through the USB-C port labelled **COM**.
 
 ## Protocol
 
-Every message between the device, server and web page is documented in [docs/protocol.md](docs/protocol.md).
+The MQTT topics and every device message are in [docs/protocol.md](docs/protocol.md).
 
-The server passes most browser commands straight to the device without knowing what they mean, so adding a new command usually means changing only the web page and the firmware.
+The old single-file server (`backend/`) and page (`web/`) were replaced by the repos above; they're in
+this repo's git history.

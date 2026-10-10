@@ -82,7 +82,7 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 - [ ] **1.13 Microphone.** INMP441 on the second I2S port. Streams from the device to the browser so the owner can answer the doorbell, and is the base for voice commands.
 
 **Reliability**
-- [ ] **1.14 Watchdog, brownout handling, memory-leak alerts,** and crash dumps saved to the `coredump` partition and uploaded on the next boot.
+- [x] **1.14 Reliability.** Loop watchdog (restarts after a 5 s freeze); restart reason on every boot (power-on, crash, freeze, brownout, …); crash summary (task, address, backtrace) read from the `coredump` partition and sent to the server; all logged and shown per device, with a low-memory warning on the page.
 
 **Done when:** with the router unplugged, an alarm still rings on time with its custom tone. An OTA update and a rollback are demonstrated. Bluetooth setup works from a test app. The device runs 72 h with no reboot.
 

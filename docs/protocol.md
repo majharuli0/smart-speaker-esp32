@@ -2,7 +2,7 @@
 
 How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.9.0` and backend `0.2.0`.
+**Version:** matches firmware `0.10.0` and backend `0.2.0`.
 
 ---
 
@@ -56,8 +56,8 @@ If a device reconnects before its old connection closes, the new connection repl
 | `{type:"tones", tones:["name.wav", ...]}` | On browser hello, and after an upload |
 | `{type:"talk_denied", deviceId, reason:"busy"\|"offline"}` | Only to the browser whose `talk_start` was refused |
 | `{type:"firmware", firmware:{board: {board, version, size, sha256, uploaded}}}` | On browser hello, and after a firmware upload. The newest file per board. |
-| `{type:"events", events:[Event, ...]}` | On browser hello: the newest 50 doorbell rings |
-| `{type:"event", event:Event}` | A new doorbell ring. `Event = {type:"doorbell", deviceId, source:"visitor"\|"page", at, delivered}` |
+| `{type:"events", events:[Event, ...]}` | On browser hello: the newest 50 events (doorbell rings and device restarts) |
+| `{type:"event", event:Event}` | A new event: a doorbell ring `{type:"doorbell", deviceId, source:"visitor"\|"page", at, delivered}` or a restart `{type:"boot", deviceId, reason, fw, crash?, at}` |
 | `{type:"server", lanUrl}` | On browser hello: this server's network address (`http://192.168.x.x:3000`), for links other devices open. `null` if it has no network. |
 | `{type:"doorbell_result", deviceId, ok:false, reason, retryIn?}` | Only to a page whose `doorbell_ring` was refused: `cooldown` or `offline` |
 
@@ -107,6 +107,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"alarms_ack", version, count}` | After every `alarms_sync`: the list is saved on the device |
 | `{type:"alarm_fired", alarmId, time}` | The device rang an alarm from its own clock |
 | `{type:"snoozed", until}` | After `snooze`: local time it will ring again (`"07:09"`), or `""` if the clock isn't set |
+| `{type:"boot", reason, fw, crash?}` | Once per boot, on first connect: why it restarted. Not relayed as-is: the server logs it as an `event` (section 11). |
 | `{type:"ota", state, progress?, error?, version}` | Update progress: `downloading` (0–100, every 10%), `restarting`, then from the new version `done`, or `failed`. `rolled_back` means the new version failed to start and the device went back to `version`. |
 | `{type:"cache", stored, wanted, card}` | How many of its alarms' tones are stored on the device (on the card, built-in, or both), and whether a microSD card is in. After each sync, each finished download, and when a card is inserted or removed. |
 | `{type:"talking"}` / `{type:"talk_stopped"}` | Talk playback starts / ends |
@@ -265,3 +266,12 @@ device: saves the list in flash → alarms_ack {version, count}
 - **Device:** `doorbell` plays a built-in **ding-dong**: two bell strikes, E5 then C5, about 2 s, at the device's volume. It's generated in code, so it needs no file or network. It's skipped if an alarm or talk is already playing.
 - **Log:** every ring, delivered or not, is saved newest-first in `events.json` (`DATA_DIR`, last 100) and announced to all pages as `event`. Pages show the last 3 per device. A visitor's ring shows a banner and changes the tab title, plus a system notification if the page was allowed to send them (asked on the first 🔔 button press).
 - **Not yet:** a physical button and ringing over Bluetooth (roadmap 1.6 / 1.12).
+
+---
+
+## 11. Reliability
+
+- **Watchdog:** at the end of `setup()` the device turns on the loop watchdog. If `loop()` doesn't come round for **5 s**, the chip restarts and reports `froze`. Long jobs (firmware download, opening a tone stream) feed it as they go.
+- **Restart reason** (`boot.reason`): `power_on`, `restart` (update, Wi-Fi reset…), `crash`, `froze` (a watchdog), `brownout` (the supply voltage dipped: weak USB cable or port, or loud audio on a weak supply), `reset_pin`, `usb_reset`, `deep_sleep`, `unknown`.
+- **Crash report:** after a crash, the ESP32 saves a report in the 64 KB `coredump` partition. On the next boot the device reads a summary, sends it as `boot.crash = {task, pc, backtrace:[…]}`, then erases it. The addresses can be turned into source lines with the build's `.elf` file.
+- **Page:** each device shows its last restart, in red with ⚠ for `crash`, `froze` and `brownout`, plus a banner. The RAM row shows ⚠ low memory when the lowest free RAM since boot drops under 32 KB.

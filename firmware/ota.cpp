@@ -95,6 +95,7 @@ void otaStart(JsonDocument &msg) {
   bool ok = true;
 
   while (done < size) {
+    feedLoopWDT();  // this loop can run for many seconds
     size_t avail = stream->available();
     if (!avail) {
       if (millis() - lastData > 10000) { ok = fail("download stalled"); break; }
@@ -122,6 +123,7 @@ void otaStart(JsonDocument &msg) {
   if (!ok) { Update.abort(); return; }
 
   // Checks the image and makes it the one to boot (on probation, see otaLoop)
+  feedLoopWDT();
   if (!Update.end()) { fail(Update.errorString()); return; }
   report("restarting", 100);
   Serial.println("Update installed, restarting");

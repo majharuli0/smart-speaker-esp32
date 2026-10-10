@@ -119,7 +119,12 @@
       state.events = [msg.event, ...state.events].slice(0, 50);
       const el = document.getElementById(`bell-${msg.event.deviceId}`);
       if (el) el.innerHTML = bellLogHtml(msg.event.deviceId);
+      const boot = document.getElementById(`boot-${msg.event.deviceId}`);
+      if (boot) boot.innerHTML = bootHtml(msg.event.deviceId);
       if (msg.event.type === 'doorbell') doorbellNotice(msg.event);
+      if (msg.event.type === 'boot' && BAD_RESTARTS[msg.event.reason]) {
+        $('notice').textContent = `⚠ ${uidOf(msg.event.deviceId)} restarted after a ${BAD_RESTARTS[msg.event.reason]}.`;
+      }
     } else if (msg.type === 'doorbell_result') {
       setStatus(msg.deviceId, msg.reason === 'cooldown' ? `🔔 just rang; wait ${Number(msg.retryIn) || 10} s` : '🔔 doorbell: device offline');
     } else if (msg.type === 'ota') {
@@ -168,7 +173,7 @@
     if (!s) return '<span class="muted">waiting for stats…</span>';
     const n = (v) => Number(v) || 0; // device data: numbers only into the HTML
     return [
-      bar('RAM', n(s.heapTotal) - n(s.heapFree), n(s.heapTotal), `${size(n(s.heapFree))} free, lowest ${size(n(s.heapMin))}`),
+      bar('RAM', n(s.heapTotal) - n(s.heapFree), n(s.heapTotal), `${size(n(s.heapFree))} free, lowest ${size(n(s.heapMin))}${n(s.heapMin) && n(s.heapMin) < 32768 ? ' ⚠ low memory' : ''}`),
       n(s.psramTotal) ? bar('PSRAM', n(s.psramTotal) - n(s.psramFree), n(s.psramTotal), `${size(n(s.psramFree))} free`) : '',
       bar('Settings', n(s.nvsUsed), n(s.nvsTotal), `${n(s.nvsUsed)} of ${n(s.nvsTotal)} entries`),
       bar('CPU 0', n(s.cpu?.[0]), 100, 'Wi-Fi'),
@@ -252,6 +257,22 @@
       `${esc(clock(e.at))} ${e.source === 'visitor' ? 'visitor' : 'test'}${e.delivered ? '' : ' (device offline)'}`).join(' · ');
   }
 
+  // ---- Restarts ----
+  const BAD_RESTARTS = { crash: 'crash', froze: 'freeze (watchdog)', brownout: 'power dip (brownout)' };
+  const RESTART_NAMES = {
+    power_on: 'power on', restart: 'restart (update / settings)', reset_pin: 'reset button',
+    usb_reset: 'reset over USB', deep_sleep: 'wake from sleep', unknown: 'unknown',
+  };
+
+  function bootHtml(id) {
+    const b = state.events.find((e) => e.type === 'boot' && e.deviceId === id);
+    if (!b) return '';
+    const bad = BAD_RESTARTS[b.reason];
+    const what = esc(bad || RESTART_NAMES[b.reason] || b.reason);
+    const crash = b.crash ? ` in ${esc(b.crash.task)} at ${esc(b.crash.pc)}` : '';
+    return `<span style="color:${bad ? '#b91c1c' : 'inherit'}">${bad ? '⚠ ' : ''}Last restart: ${what}${crash}</span> · ${esc(new Date(b.at).toLocaleString())}`;
+  }
+
   function doorbellNotice(e) {
     if (e.source !== 'visitor') return;  // your own test rings don't need an alert
     $('notice').textContent = `🔔 Someone is at the door (${uidOf(e.deviceId)}, ${clock(e.at)}). Use Hold to talk to answer.`;
@@ -292,6 +313,7 @@
             <span class="vol">${state.volume[id] ?? '…'}%</span>
           </div>
           <div class="muted" id="bell-${esc(id)}">${bellLogHtml(id)}</div>
+          <div class="muted" id="boot-${esc(id)}">${bootHtml(id)}</div>
           <div class="stats" id="stats-${esc(id)}">${statsHtml(state.stats[id])}</div>
           <div class="stats" id="parts-${esc(id)}">${partsHtml(state.partitions[id])}</div>
           <ul class="alarms">${alarms.map((a) => `

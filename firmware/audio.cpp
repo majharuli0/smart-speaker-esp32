@@ -118,7 +118,9 @@ static bool openTone() {
   http.setConnectTimeout(TONE_TIMEOUT_MS);  // don't hang when offline: beep instead
   http.setTimeout(TONE_TIMEOUT_MS);
   http.begin("http://" + serverAddress().toString() + ":" + String(SERVER_PORT) + "/tones/" + ringingTone);
+  feedLoopWDT();  // connect + first data can take up to 2 x TONE_TIMEOUT_MS, near the 5 s watchdog
   if (http.GET() != HTTP_CODE_OK) return false;
+  feedLoopWDT();
   toneStream = http.getStreamPtr();
   uint8_t header[44];  // standard WAV header, as written by the web page
   if (toneStream->readBytes(header, sizeof(header)) != sizeof(header)) return false;

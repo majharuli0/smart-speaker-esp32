@@ -7,6 +7,7 @@
 //   alarms - alarms stored on the device, rung from its own clock
 //   tonecache - the tones those alarms use, stored on the device
 //   ota    - firmware updates over Wi-Fi, with automatic rollback
+//   health - restart reason, crash reports, and a watchdog against freezes
 // Messages are documented in docs/protocol.md.
 #include <ArduinoJson.h>
 #include "config.h"
@@ -17,6 +18,7 @@
 #include "alarms.h"
 #include "tonecache.h"
 #include "ota.h"
+#include "health.h"
 
 static void blink() {
   digitalWrite(LED_BUILTIN, HIGH);
@@ -29,6 +31,7 @@ static void onConnected() {
   sendVolume();
   sendPartitions();
   otaReport();
+  healthReport();
 }
 
 static void onCommand(uint8_t *payload, size_t length) {
@@ -60,6 +63,7 @@ static void onAudio(uint8_t *payload, size_t length) { talkPush(payload, length)
 void setup() {
   Serial.begin(115200);
   Serial.setDebugOutput(true);  // ESP32 core error messages to this (USB) port too
+  healthSetup();
   otaSetup();
   pinMode(LED_BUILTIN, OUTPUT);  // the board's RGB LED (GPIO 48)
   audioSetup();
@@ -68,6 +72,7 @@ void setup() {
   alarmsSetup();
   netSetup({onConnected, onCommand, onAudio});
   timeSetup();
+  healthWatchdog();  // last: setup may block (first-boot Wi-Fi hotspot, formatting storage)
 }
 
 void loop() {

@@ -30,17 +30,21 @@ try { events = JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf8')); } catch {}
 const saveEvents = () => fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2));
 const lastBell = {}; // deviceId -> ms of the last accepted ring
 
+// Doorbell rings and device restarts: saved newest-first and announced to pages
+function logEvent(event) {
+  events = [event, ...events].slice(0, MAX_EVENTS);
+  saveEvents();
+  toBrowsers({ type: 'event', event });
+}
+
 function ringDoorbell(deviceId, source) {
   const now = Date.now();
   const since = now - (lastBell[deviceId] || 0);
   if (since < BELL_COOLDOWN_MS) return { ok: false, reason: 'cooldown', retryIn: Math.ceil((BELL_COOLDOWN_MS - since) / 1000) };
   lastBell[deviceId] = now;
   const delivered = toDevice(deviceId, { type: 'doorbell' });
-  const event = { type: 'doorbell', deviceId, source, at: new Date(now).toISOString(), delivered };
-  events = [event, ...events].slice(0, MAX_EVENTS);
-  saveEvents();
+  logEvent({ type: 'doorbell', deviceId, source, at: new Date(now).toISOString(), delivered });
   console.log(`Doorbell ${deviceId} (${source}): ${delivered ? 'rang' : 'device offline'}`);
-  toBrowsers({ type: 'event', event });
   return delivered ? { ok: true } : { ok: false, reason: 'offline' };
 }
 
@@ -340,6 +344,12 @@ wss.on('connection', (ws) => {
     // Device -> browsers: relay anything, tagged with which device sent it.
     if (ws.role === 'browser') toDevice(msg.target, msg);
     else if (ws.role === 'device') {
+      // Why the device last restarted (and crash details, if it crashed): keep it in the log
+      if (msg.type === 'boot') {
+        const { reason, fw, crash } = msg;
+        console.log(`Device ${ws.deviceId} started (${reason}, firmware ${fw})${crash ? ' after a CRASH in ' + crash.task : ''}`);
+        return logEvent({ type: 'boot', deviceId: ws.deviceId, reason: String(reason || 'unknown'), fw, ...(crash && { crash }), at: new Date().toISOString() });
+      }
       const tagged = { ...msg, deviceId: ws.deviceId };
       // A one-time alarm has now rung: switch it off
       if (msg.type === 'alarm_fired') {

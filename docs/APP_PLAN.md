@@ -154,7 +154,7 @@ Replaces the one `DEVICE_SECRET` shared by every speaker (a cracked speaker woul
 - **Later, for real production:** flash encryption and secure boot, so the secret can't be read out of the chip, and signed firmware updates.
 
 ### M8 Must-fix before real users
-1. **Wi-Fi recovery (firmware).** Today, if the router or Wi-Fi password changes, the speaker can never connect again: the only way into Bluetooth setup is "Reset Wi-Fi", which needs the speaker online. Fix: if the saved Wi-Fi fails for ~5 min, also open Bluetooth setup while still retrying.
+1. ✅ *(firmware 0.14.0, 2026-10-10)* **Wi-Fi recovery (firmware).** Today, if the router or Wi-Fi password changes, the speaker can never connect again: the only way into Bluetooth setup is "Reset Wi-Fi", which needs the speaker online. Fix: if the saved Wi-Fi fails for ~5 min, also open Bluetooth setup while still retrying.
 2. **Forgot password.** A reset email (backend sends mail), plus email verification and "delete my account".
 3. **Family sharing.** The owner invites others by email; roles are owner and member. Members control the speaker; only the owner removes it or manages members.
 4. **Clock without internet.** A DS3231 RTC module (coin cell), so alarms ring after a power cut even when the internet is down. Needs hardware.

@@ -1,6 +1,7 @@
 #include "net.h"
 #include <WiFi.h>
 #include <WiFiProv.h>
+#include "network_provisioning/scheme_ble.h"
 #include <ESPmDNS.h>
 #include "mqtt_client.h"
 #include "esp_crt_bundle.h"
@@ -22,6 +23,10 @@ static esp_mqtt_client_handle_t mqtt = nullptr;
 static String topicCmd, topicAudio, topicEvt, topicOnline;
 static volatile bool brokerUp = false;  // set on the MQTT task
 static volatile bool bluetoothOn = false;  // Wi-Fi setup over Bluetooth in progress (set on the event task)
+static volatile bool credsReceived = false;  // the app sent Wi-Fi details in this setup session
+static volatile bool setupEnded = false;     // the setup session finished: close it on the main loop
+static bool lowLatency = false;              // Wi-Fi power saving off (only while Bluetooth is off)
+static String setupName;                     // Bluetooth name during setup: "SS-09FC"
 static bool serverUp = false;            // main loop only
 static String httpBase;
 
@@ -75,9 +80,11 @@ static void onProvEvent(arduino_event_t *e) {
   switch (e->event_id) {
     case ARDUINO_EVENT_PROV_START:
       bluetoothOn = true;
+      credsReceived = false;
       Serial.println("Wi-Fi setup: waiting for the app over Bluetooth");
       break;
     case ARDUINO_EVENT_PROV_CRED_RECV:
+      credsReceived = true;
       Serial.printf("Wi-Fi setup: got the details for \"%s\"\n", (const char *)e->event_info.prov_cred_recv.ssid);
       break;
     case ARDUINO_EVENT_PROV_CRED_FAIL:
@@ -87,6 +94,9 @@ static void onProvEvent(arduino_event_t *e) {
       break;
     case ARDUINO_EVENT_PROV_CRED_SUCCESS:
       Serial.println("Wi-Fi setup: done");
+      break;
+    case ARDUINO_EVENT_PROV_END:
+      setupEnded = true;  // the app has its answer: close Bluetooth (on the main loop)
       break;
     case ARDUINO_EVENT_PROV_DEINIT:
       bluetoothOn = false;  // Bluetooth is off and its memory released
@@ -191,6 +201,41 @@ static bool startMqtt() {
   return true;
 }
 
+static bool hasSavedWifi() {
+  wifi_config_t saved;
+  return esp_wifi_get_config(WIFI_IF_STA, &saved) == ESP_OK && saved.sta.ssid[0];
+}
+
+// Espressif's Wi-Fi provisioning over Bluetooth (security 1: an encrypted session
+// that needs the label code), the same service WiFiProv sets up, so the same
+// apps find it. Can be opened at any time and closed again: Bluetooth's memory is
+// kept (no "free BLE" handler), so it can reopen later.
+static const uint8_t SETUP_SERVICE_UUID[16] = {0xb4, 0xdf, 0x5a, 0x1c, 0x3f, 0x6b, 0xf4, 0xbf,
+                                               0xea, 0x4a, 0x82, 0x03, 0x04, 0x90, 0x1a, 0x02};
+
+static void startBluetoothSetup() {
+  if (bluetoothOn) return;
+  WiFi.setSleep(true);  // Wi-Fi and Bluetooth share the radio: Wi-Fi must allow power saving
+  lowLatency = false;
+  network_prov_mgr_config_t cfg = {};
+  cfg.scheme = network_prov_scheme_ble;
+  cfg.scheme_event_handler = NETWORK_PROV_EVENT_HANDLER_NONE;
+  if (network_prov_mgr_init(cfg) != ESP_OK) {
+    Serial.println("Wi-Fi setup: Bluetooth didn't start");
+    return;
+  }
+  network_prov_scheme_ble_set_service_uuid((uint8_t *)SETUP_SERVICE_UUID);
+  if (network_prov_mgr_start_provisioning(NETWORK_PROV_SECURITY_1, devicePop.c_str(), setupName.c_str(), nullptr) !=
+      ESP_OK) {
+    network_prov_mgr_deinit();
+    Serial.println("Wi-Fi setup: Bluetooth didn't start");
+    return;
+  }
+  WiFiProv.printQR(setupName.c_str(), devicePop.c_str(), "ble");  // for testing with Espressif's "ESP BLE Provisioning" app
+}
+
+static void stopBluetoothSetup() { network_prov_mgr_deinit(); }  // safe to call twice
+
 void netSetup(const NetHandlers &h) {
   handlers = h;
   makeDeviceId();
@@ -208,18 +253,15 @@ void netSetup(const NetHandlers &h) {
   // Saved Wi-Fi: connects in the background and never blocks. If the router is
   // down (e.g. still booting after a power cut) the device keeps running and
   // alarms keep ringing; the Wi-Fi driver reconnects by itself when it's back.
-  // No Wi-Fi yet: advertises over Bluetooth as "SS-09FC" until the app sends it
-  // (alarms and the clock keep working meanwhile). Afterwards Bluetooth is
-  // switched off and its memory freed.
-  String name = PROV_NAME_PREFIX + deviceId.substring(deviceId.length() - 4);
-  name.toUpperCase();
+  // No Wi-Fi yet: Bluetooth setup as "SS-09FC" until the app sends it (alarms and
+  // the clock keep working meanwhile). See netLoop() for Wi-Fi recovery.
+  setupName = PROV_NAME_PREFIX + deviceId.substring(deviceId.length() - 4);
+  setupName.toUpperCase();
   WiFi.onEvent(onProvEvent);
+  WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
-  WiFiProv.beginProvision(NETWORK_PROV_SCHEME_BLE, NETWORK_PROV_SCHEME_HANDLER_FREE_BLE, NETWORK_PROV_SECURITY_1,
-                          devicePop.c_str(), name.c_str());
-  wifi_config_t saved;
-  if (esp_wifi_get_config(WIFI_IF_STA, &saved) == ESP_OK && !saved.sta.ssid[0])
-    WiFiProv.printQR(name.c_str(), devicePop.c_str(), "ble");  // for testing with Espressif's "ESP BLE Provisioning" app
+  if (hasSavedWifi()) WiFi.begin();
+  else startBluetoothSetup();
 }
 
 void netLoop() {
@@ -250,9 +292,28 @@ void netLoop() {
       Serial.println("Broker moved: " + brokerAt);
     }
   }
+  // Wi-Fi recovery: if the saved network has been unreachable for WIFI_RECOVERY_MS
+  // (new router, changed password), also open Bluetooth setup so the app can send
+  // new details, while still trying the old network. If the old one comes back
+  // first, Bluetooth closes again.
+  static unsigned long wifiDownSince = millis();
+  if (wifiUp) wifiDownSince = 0;
+  else if (!wifiDownSince) wifiDownSince = millis();
+  if (!wifiUp && !bluetoothOn && wifiDownSince && millis() - wifiDownSince > WIFI_RECOVERY_MS && hasSavedWifi()) {
+    Serial.println("Wi-Fi unreachable for " + String(WIFI_RECOVERY_MS / 60000) + " min: opening Bluetooth setup too");
+    startBluetoothSetup();
+  }
+  if (setupEnded) {  // the app got its answer
+    setupEnded = false;
+    stopBluetoothSetup();
+  }
+  if (wifiUp && bluetoothOn && !credsReceived) {
+    Serial.println("Wi-Fi is back: closing Bluetooth setup");
+    stopBluetoothSetup();
+  }
+
   // Low latency for talk audio. Not allowed while Bluetooth is on (they share the radio).
-  static bool sleepOff = false;
-  if (wifiUp && !sleepOff && !bluetoothOn) sleepOff = WiFi.setSleep(false);
+  if (wifiUp && !lowLatency && !bluetoothOn) lowLatency = WiFi.setSleep(false);
 
   Inbox item;
   while (xQueueReceive(inbox, &item, 0) == pdTRUE) {

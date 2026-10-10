@@ -59,7 +59,8 @@ Devices connect to the **MQTT broker**, not to the server. Since firmware 0.13.0
 - **QR label:** `SS:<UID>:<code>`, e.g. `SS:2884856409FC:7f3a91c2`. The code is the first 8 hex characters of HMAC-SHA256(`DEVICE_SECRET`, internal device ID). The secret is in the firmware (`secrets.h`) and the backend (`.env`), so no per-device record is needed. The code is:
   - the **Bluetooth setup code** (proof of possession, Espressif provisioning security 1): the phone can't send Wi-Fi details without it;
   - the **proof of ownership** when adding the device to an account (`POST /api/v1/devices/claim`).
-- **Wi-Fi setup** (firmware 0.12.0+): with no Wi-Fi saved, the device advertises over Bluetooth as `SS-XXXX` (last 4 of the ID, uppercase) until a phone sends the details; then Bluetooth is switched off and its memory freed.
+- **Wi-Fi setup** (firmware 0.12.0+): with no Wi-Fi saved, the device advertises over Bluetooth as `SS-XXXX` (last 4 of the ID, uppercase) until a phone sends the details; then Bluetooth is switched off.
+- **Wi-Fi recovery** (0.14.0+): if the saved network has been unreachable for 5 minutes (new router, changed password), the device also opens Bluetooth setup, while it keeps trying the old network. If the old network comes back first, Bluetooth closes again; if the app sends new details, the device switches to them.
 - **Users** log in to the backend (`smart-speaker-backend`); each sees and controls only the devices they've added.
 
 ---

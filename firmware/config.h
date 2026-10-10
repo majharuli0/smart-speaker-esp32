@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.13.1"
+#define FW_VERSION "0.14.0"
 
 // ---- Broker address and device secret: in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -15,6 +15,7 @@
 #error "Add DEVICE_SECRET to secrets.h: the same value as DEVICE_SECRET in the backend's .env"
 #endif
 #define PROV_NAME_PREFIX "SS-"   // Bluetooth name during Wi-Fi setup + last 4 of the device ID: "SS-09FC"
+#define WIFI_RECOVERY_MS (5 * 60 * 1000UL)  // saved Wi-Fi unreachable this long: open Bluetooth setup too
 
 // ---- Time ----
 #define NTP_SERVER_1 "pool.ntp.org"

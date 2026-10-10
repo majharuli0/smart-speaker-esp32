@@ -3,80 +3,152 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LED Demo</title>
+<title>Smart Speaker</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
-  ul { list-style: none; padding: 0; }
+  :root {
+    --bg: #f3f4f6; --card: #fff; --text: #111827; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #4f46e5; --accent-soft: #eef2ff; --ok: #16a34a; --warn: #d97706; --bad: #dc2626; --bad-soft: #fef2f2;
+    --btn: #fff; --btn-hover: #f9fafb; --track: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #181b22; --text: #e5e7eb; --muted: #9ca3af; --line: #2a2f3a;
+      --accent: #818cf8; --accent-soft: #1e1b4b; --bad-soft: #2a1215; --btn: #1f232c; --btn-hover: #262b36; --track: #2a2f3a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text);
+         max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem 3rem; line-height: 1.4; }
+  a { color: var(--accent); }
+  h1 { font-size: 1.5rem; margin: 0; }
+  h2 { font-size: 1.05rem; margin: 0 0 0.75rem; }
+  h3 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 1rem 0 0.4rem; font-weight: 600; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem; margin-bottom: 1rem;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); }
   .row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
-  .device { border: 1px solid #ddd; border-radius: 8px; padding: 0.8rem; margin-bottom: 1rem; }
-  .device b { font-family: monospace; font-size: 1.05rem; }
-  .st { flex: 1; color: #b45309; }
-  [data-volume] { flex: 1; max-width: 240px; }
-  .vol { min-width: 3em; color: #555; }
-  .alarms li { display: flex; gap: 0.5rem; align-items: center; padding: 0.3rem 0; border-bottom: 1px solid #eee; }
+  .muted { color: var(--muted); font-size: 0.88rem; }
+  .pill { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; padding: 0.2rem 0.65rem; border-radius: 999px;
+          background: var(--track); color: var(--muted); }
+  .pill.ok { background: #dcfce7; color: #166534; }
+  .pill.bad { background: #fee2e2; color: #991b1b; }
+  .pill.ok::before, .pill.bad::before { content: ''; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: currentColor; }
+  .notice { background: var(--bad-soft); border: 1px solid #fecaca; color: var(--bad); border-radius: 10px; padding: 0.6rem 0.8rem; margin-bottom: 1rem; }
+  .notice:empty { display: none; }
+
+  button { font: inherit; font-size: 0.88rem; padding: 0.4rem 0.8rem; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--btn); color: var(--text); cursor: pointer; }
+  button:hover { background: var(--btn-hover); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:active { filter: brightness(0.9); }
+  button.danger { color: var(--bad); border-color: #fecaca; }
+  input, select { font: inherit; font-size: 0.88rem; padding: 0.35rem 0.5rem; border-radius: 8px; border: 1px solid var(--line);
+                  background: var(--btn); color: var(--text); }
+  input[type=checkbox] { accent-color: var(--accent); }
+  input[type=range] { accent-color: var(--accent); padding: 0; border: 0; background: none; }
+
+  /* Device card */
+  .dev-head { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+  .dev-head b { font-family: ui-monospace, monospace; font-size: 1.1rem; letter-spacing: 0.02em; }
+  .st:empty { display: none; }
+  .st { background: #fef3c7; color: #92400e; }
+  .groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.25rem 1.5rem; }
+  .groups > :first-child { grid-column: 1 / -1; }  /* Sound: the most buttons, a full row */
+  .vol-row { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.9rem; }
+  [data-volume] { flex: 1; max-width: 320px; }
+  .vol { min-width: 3em; color: var(--muted); font-size: 0.88rem; }
+  .log { margin-top: 0.5rem; }
+  .log:empty, #devices .muted:empty { display: none; }
+
+  /* Alarms */
+  .alarms li { display: flex; gap: 0.6rem; align-items: center; padding: 0.45rem 0; border-bottom: 1px solid var(--line); }
+  .alarms li:last-child { border-bottom: 0; }
   .alarms li span { flex: 1; }
-  .add label { font-size: 0.85rem; }
-  .muted, #status { color: #888; }
-  #notice { color: #b91c1c; }
-  .stats { display: grid; gap: 0.25rem; margin: 0.6rem 0; font-size: 0.82rem; }
+  .alarms li b { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+  .add { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px dashed var(--line); }
+  .days label { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.8rem; padding: 0.2rem 0.5rem;
+                border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
+  .days label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
+
+  /* Health & storage */
+  details { margin-top: 0.9rem; border-top: 1px solid var(--line); padding-top: 0.6rem; }
+  summary { cursor: pointer; color: var(--muted); font-size: 0.88rem; }
+  .stats { display: grid; gap: 0.3rem; margin: 0.6rem 0; font-size: 0.82rem; }
   .stat { display: grid; grid-template-columns: 5.5em minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; }
-  .bar { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; }
-  .bar i { display: block; height: 100%; background: #16a34a; transition: width 0.4s; }
-  .bar.amber i { background: #d97706; }
-  .bar.red i { background: #dc2626; }
+  .bar { height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--ok); transition: width 0.4s; }
+  .bar.amber i { background: var(--warn); }
+  .bar.red i { background: var(--bad); }
   .flashbar { display: flex; height: 22px; border-radius: 6px; overflow: hidden; margin: 0.3rem 0 0.4rem; }
   .flashbar i { display: block; min-width: 3px; } /* tiny parts (8 KB of 16 MB) stay visible */
   .swatch { display: inline-block; width: 0.8em; height: 0.8em; border-radius: 3px; margin-right: 0.4em; vertical-align: -0.05em; }
   .parts { border-collapse: collapse; width: 100%; max-width: 360px; }
-  .parts th, .parts td { text-align: left; padding: 0.15rem 0.5rem 0.15rem 0; border-bottom: 1px solid #eee; }
-  .parts th { color: #888; font-weight: normal; }
+  .parts th, .parts td { text-align: left; padding: 0.15rem 0.5rem 0.15rem 0; border-bottom: 1px solid var(--line); }
+  .parts th { color: var(--muted); font-weight: normal; }
   .parts td:not(:first-child), .parts th:not(:first-child) { text-align: right; }
+
+  /* Tones */
+  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
+  .chips li a { display: inline-block; font-size: 0.82rem; padding: 0.25rem 0.6rem; border-radius: 999px; background: var(--accent-soft);
+                text-decoration: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #fwlist { margin-top: 0.6rem; }
   [data-talk] { touch-action: none; user-select: none; }
-  [data-talk]:active { background: #fde68a; }
+  [data-talk]:active { filter: brightness(0.85); }
 </style>
 </head>
 <body>
-  <h1>Devices</h1>
-  <p id="status">connecting…</p>
-  <p id="notice"></p>
+  <header>
+    <h1>🔊 Smart Speaker</h1>
+    <span id="status" class="pill">connecting…</span>
+  </header>
+  <div id="notice" class="notice"></div>
   <ul id="devices"></ul>
 
-  <h2>Tones</h2>
-  <div class="row">
-    <input id="file" type="file" accept="audio/*">
-    <button id="upload">Upload</button>
-    <span id="upmsg" class="muted"></span>
-  </div>
-  <ul id="tones"></ul>
+  <section class="card">
+    <h2>🎵 Tones</h2>
+    <div class="row">
+      <input id="file" type="file" accept="audio/*">
+      <button id="upload" class="primary">Upload</button>
+      <span id="upmsg" class="muted"></span>
+    </div>
+    <p class="muted">Any audio file; it's converted to the device's format (first 30 s). Alarm times are in each device's own time zone.</p>
+    <ul id="tones" class="chips"></ul>
+  </section>
 
-  <h2>Firmware</h2>
-  <div class="row">
-    <input id="fwfile" type="file" accept=".bin">
-    <button id="fwupload">Upload</button>
-    <span id="fwmsg" class="muted"></span>
-  </div>
-  <p class="muted">Build with <code>./fw.sh build</code>, then upload <code>firmware/build/s3/firmware.ino.bin</code>. Devices with a different version get an <b>Update</b> button.</p>
-  <ul id="fwlist"></ul>
+  <section class="card">
+    <h2>⬆️ Firmware</h2>
+    <div class="row">
+      <input id="fwfile" type="file" accept=".bin">
+      <button id="fwupload" class="primary">Upload</button>
+      <span id="fwmsg" class="muted"></span>
+    </div>
+    <p class="muted">Build with <code>./fw.sh build</code>, then upload <code>firmware/build/s3/firmware.ino.bin</code>. Devices with a different version get an <b>Update</b> button.</p>
+    <ul id="fwlist"></ul>
+  </section>
 
 <script>
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MAX_TONE_SECONDS = 30;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {}, alarmVersions: {}, acked: {}, cache: {}, firmware: {}, events: [], lanUrl: null };
+  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {}, alarmVersions: {}, acked: {}, cache: {}, firmware: {}, events: [], lanUrl: null, healthOpen: {} };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
   const uidOf = (id) => id.replace('esp32-', '').toUpperCase(); // display only; commands use id
 
-  // Served by server.js → same host; opened as a file or via Live Server → local server
-  const serverHost = location.port === '3000' ? location.host : 'localhost:3000';
+  // Served by server.js (any address or port) → that server. Opened as a file, or
+  // from VS Code's Live Server (port 5500/5501) → the local server on port 3000.
+  const fromServer = location.protocol.startsWith('http') && !['5500', '5501'].includes(location.port);
+  const serverHost = fromServer ? location.host : 'localhost:3000';
   const ws = new WebSocket(`ws://${serverHost}`);
   const send = (msg) => ws.send(JSON.stringify(msg));
 
   ws.onopen = () => {
-    $('status').textContent = "connected · alarm times are in each device's own time zone (see its clock)";
+    $('status').textContent = 'connected';
+    $('status').className = 'pill ok';
     send({ type: 'hello', role: 'browser' });
   };
-  ws.onclose = () => { $('status').textContent = 'disconnected (reload the page)'; };
+  ws.onclose = () => { $('status').textContent = 'disconnected · reload the page'; $('status').className = 'pill bad'; };
 
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
@@ -277,7 +349,7 @@
     if (e.source !== 'visitor') return;  // your own test rings don't need an alert
     $('notice').textContent = `🔔 Someone is at the door (${uidOf(e.deviceId)}, ${clock(e.at)}). Use Hold to talk to answer.`;
     document.title = '🔔 Doorbell!';
-    setTimeout(() => { document.title = 'LED Demo'; }, 15000);
+    setTimeout(() => { document.title = 'Smart Speaker'; }, 15000);
     if ('Notification' in window && Notification.permission === 'granted') new Notification('Someone is at the door', { body: uidOf(e.deviceId) });
   }
 
@@ -287,7 +359,7 @@
       .join('') || '<li class="muted">No firmware uploaded yet.</li>';
     $('tones').innerHTML = state.tones
       .map((t) => `<li><a href="http://${serverHost}/tones/${esc(t)}" target="_blank">${esc(t)}</a></li>`)
-      .join('') || '<li class="muted">No tones yet, upload one below.</li>';
+      .join('') || '<li class="muted">No tones yet.</li>';
 
     const toneOptions = state.tones.map((t) => `<option>${esc(t)}</option>`).join('');
     const dayBoxes = DAYS.map((d, i) =>
@@ -296,42 +368,73 @@
     $('devices').innerHTML = state.devices.map((id) => {
       const alarms = state.alarms.filter((a) => a.deviceId === id).sort((a, b) => a.time.localeCompare(b.time));
       return `
-        <li class="device" data-id="${esc(id)}">
-          <div class="row">
-            <b>${esc(uidOf(id))}</b><span class="st" id="st-${esc(id)}">${esc(state.status[id] || '')}</span>
-            <button data-cmd="blink">Blink</button>
-            <button data-cmd="test">Test tone</button>
-            <button data-cmd="stop">Stop</button>
-            <button data-cmd="snooze" title="Stop ringing; ring again in 9 minutes">Snooze</button>
-            <button data-talk>Hold to talk</button>
-            <button data-cmd="bell" title="Ring this device's doorbell (a test ring)">🔔 Doorbell</button>
-            <a href="${bellLink(id)}" target="_blank" title="The page visitors open (for a QR code at the door)">visitor link</a>
-            <button data-cmd="reset">Reset Wi-Fi</button>
+        <li class="card device" data-id="${esc(id)}">
+          <div class="dev-head">
+            <b>${esc(uidOf(id))}</b>
+            <span class="pill st" id="st-${esc(id)}">${esc(state.status[id] || '')}</span>
           </div>
-          <div class="row">
+
+          <div class="groups">
+            <div>
+              <h3>Sound</h3>
+              <div class="row">
+                <button data-cmd="test">▶ Test tone</button>
+                <button data-cmd="stop">■ Stop</button>
+                <button data-cmd="snooze" title="Stop ringing; ring again in 9 minutes">💤 Snooze</button>
+                <button data-talk class="primary">🎙 Hold to talk</button>
+              </div>
+            </div>
+            <div>
+              <h3>Doorbell</h3>
+              <div class="row">
+                <button data-cmd="bell" title="Ring this device's doorbell (a test ring)">🔔 Ring</button>
+                <a href="${bellLink(id)}" target="_blank" title="The page visitors open (for a QR code at the door)">Visitor link ↗</a>
+              </div>
+            </div>
+            <div>
+              <h3>Device</h3>
+              <div class="row">
+                <button data-cmd="blink">💡 Blink</button>
+                <button data-cmd="reset" class="danger">Reset Wi-Fi</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="vol-row">
             🔊 <input type="range" min="0" max="100" data-volume value="${state.volume[id] ?? 70}">
             <span class="vol">${state.volume[id] ?? '…'}%</span>
           </div>
-          <div class="muted" id="bell-${esc(id)}">${bellLogHtml(id)}</div>
+          <div class="muted log" id="bell-${esc(id)}">${bellLogHtml(id)}</div>
           <div class="muted" id="boot-${esc(id)}">${bootHtml(id)}</div>
-          <div class="stats" id="stats-${esc(id)}">${statsHtml(state.stats[id])}</div>
-          <div class="stats" id="parts-${esc(id)}">${partsHtml(state.partitions[id])}</div>
+
+          <h3>Alarms</h3>
           <ul class="alarms">${alarms.map((a) => `
             <li data-alarm="${esc(a.id)}">
               <input type="checkbox" data-cmd="toggle" title="Enabled" ${a.enabled ? 'checked' : ''}>
-              <span><b>${esc(a.time)}</b> ${a.date ? `once, ${esc(a.date)}${a.enabled ? '' : ' (done)'}` : a.days.map((d) => DAYS[d]).join(' ')} · ${esc(a.tone)}</span>
-              <button data-cmd="delete">Delete</button>
-            </li>`).join('')}
+              <span><b>${esc(a.time)}</b> <span class="muted">${a.date ? `once, ${esc(a.date)}${a.enabled ? '' : ' (done)'}` : a.days.map((d) => DAYS[d]).join(' ')} · ${esc(a.tone)}</span></span>
+              <button data-cmd="delete" class="danger">Delete</button>
+            </li>`).join('') || '<li class="muted">No alarms yet.</li>'}
           </ul>
           <div class="muted" id="sync-${esc(id)}">${syncHtml(id)}</div>
-          <div class="row add">
-            <input type="time"> ${dayBoxes}
-            <label title="Pick a date for a one-time alarm (weekdays are then ignored)">or once on <input type="date" data-date></label>
-            <select>${toneOptions}</select>
-            <button data-cmd="add">Add alarm</button>
+          <div class="add">
+            <div class="row">
+              <input type="time">
+              <select>${toneOptions}</select>
+              <button data-cmd="add" class="primary">+ Add alarm</button>
+            </div>
+            <div class="row days" style="margin-top:0.5rem">
+              ${dayBoxes}
+              <span class="muted" style="margin-left:0.3rem">or once on</span> <input type="date" data-date title="Pick a date for a one-time alarm (weekdays are then ignored)">
+            </div>
           </div>
+
+          <details data-health ${state.healthOpen[id] ? 'open' : ''}>
+            <summary>Health &amp; storage</summary>
+            <div class="stats" id="stats-${esc(id)}">${statsHtml(state.stats[id])}</div>
+            <div class="stats" id="parts-${esc(id)}">${partsHtml(state.partitions[id])}</div>
+          </details>
         </li>`;
-    }).join('') || '<li class="muted">No devices online</li>';
+    }).join('') || '<li class="card muted">No devices online.</li>';
   }
 
   $('devices').addEventListener('click', (e) => {
@@ -363,12 +466,16 @@
     if (cmd === 'delete') send({ type: 'alarm_delete', id: alarm.id });
     if (cmd === 'add') {
       const time = add.querySelector('[type=time]').value;
-      const days = [...add.querySelectorAll('[type=checkbox]:checked')].map((c) => Number(c.value));
+      const days = [...add.querySelectorAll('.days [type=checkbox]:checked')].map((c) => Number(c.value));
       const date = add.querySelector('[data-date]').value;  // one-time alarm: replaces the weekdays
       if (!time || !tone || (!date && !days.length)) return alert('Pick a time, a tone, and at least one day or a date.');
       send({ type: 'alarm_save', alarm: date ? { deviceId: id, time, days: [], date, tone } : { deviceId: id, time, days, tone } });
     }
   });
+
+  $('devices').addEventListener('toggle', (e) => {
+    if (e.target.matches('[data-health]')) state.healthOpen[e.target.closest('[data-id]').dataset.id] = e.target.open;
+  }, true);
 
   // Volume: label follows while dragging; sent to the device on release
   // (the device saves it to flash, so don't write on every pixel of movement)

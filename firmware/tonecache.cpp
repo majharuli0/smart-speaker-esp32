@@ -369,6 +369,11 @@ bool cacheOpen(const String &tone, File &file) {
 
 bool cacheReady() { return stores[BUILTIN].ready; }
 
+fs::FS *storage(const String &name) {
+  int s = name == "card" ? CARD : name == "builtin" ? BUILTIN : -1;
+  return s >= 0 && stores[s].ready ? stores[s].fs : nullptr;
+}
+
 void cardInfo(JsonObject o) {
   o["present"] = stores[CARD].ready;
   if (!stores[CARD].ready) {

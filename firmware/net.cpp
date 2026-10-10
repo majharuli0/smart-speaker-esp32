@@ -192,7 +192,7 @@ static bool startMqtt() {
   cfg.session.last_will.qos = 1;
   cfg.session.last_will.retain = 1;
   cfg.buffer.size = 8192;  // fits the largest command (alarms_sync with 20 alarms)
-  cfg.buffer.out_size = 4096;
+  cfg.buffer.out_size = 16384;  // a folder listing (files_list) can be several KB
   cfg.network.reconnect_timeout_ms = 5000;
   mqtt = esp_mqtt_client_init(&cfg);
   esp_mqtt_client_register_event(mqtt, MQTT_EVENT_ANY, onMqttEvent, nullptr);

@@ -9,8 +9,10 @@ void audioLoop();   // call every loop(): feeds the speaker one small chunk
 void setVolume(int v);
 void sendVolume();  // report it to the server
 
-// Ringing: streams tone from the server, loops it until stopped or RING_MAX_MS
-void toneStart(const String &tone, bool fadeIn = false);  // fadeIn: alarms start quiet and rise
+// Ringing: a stored copy of the tone, or one of the user's files ("card:/Music/Rain.wav"),
+// or streamed from the server. Loops until stopped or RING_MAX_MS; once: plays the
+// whole sound one time (previews from the file manager). fadeIn: alarms start quiet and rise.
+void toneStart(const String &tone, bool fadeIn = false, bool once = false);
 void toneStop();
 
 // Doorbell: a built-in ding-dong, played once (skipped if an alarm or talk is playing)

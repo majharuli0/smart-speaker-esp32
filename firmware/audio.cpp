@@ -6,6 +6,7 @@
 #include "config.h"
 #include "net.h"
 #include "tonecache.h"
+#include "files.h"
 
 static Preferences prefs;
 static int volume = DEFAULT_VOLUME;
@@ -24,6 +25,7 @@ static File toneFile;           // stored copy of the tone, when there is one
 static bool fromFile = false;
 static unsigned long ringStart = 0;
 static bool fading = false;  // alarm: volume rises from 10% over FADE_IN_MS
+static bool playOnce = false;  // a preview: play the file once, then stop
 
 static int16_t talkBuf[TALK_BUF_SAMPLES];
 static size_t talkHead = 0, talkCount = 0;  // read position, samples buffered
@@ -109,14 +111,16 @@ static bool openTone() {
   if (ringingTone.isEmpty()) return false;
   fromFile = false;
   if (toneFile) toneFile.close();
-  // Stored copy: SD card first, then built-in storage
-  if (cacheOpen(ringingTone, toneFile) && toneFile.seek(44)) {  // skip the 44-byte WAV header
+  // One of the user's files, or the stored copy of a tone (SD card first, then built-in)
+  bool opened = isFileSound(ringingTone) ? filesOpen(ringingTone, toneFile) : cacheOpen(ringingTone, toneFile);
+  if (opened && toneFile.seek(44)) {  // skip the 44-byte WAV header
     fromFile = true;
     toneBytesLeft = toneFile.size() - 44;
     return toneBytesLeft > 0;
   }
   http.setConnectTimeout(TONE_TIMEOUT_MS);  // don't hang when offline: beep instead
   http.setTimeout(TONE_TIMEOUT_MS);
+  if (isFileSound(ringingTone)) return false;  // a file that isn't there: beep instead
   if (serverHttp().isEmpty()) return false;  // download address not known yet (server not seen)
   http.begin(serverHttp() + "/tones/" + ringingTone);
   feedLoopWDT();  // connect + first data can take up to 2 x TONE_TIMEOUT_MS, near the 5 s watchdog
@@ -160,7 +164,7 @@ void toneStop() {
   netSend("{\"type\":\"stopped\"}");
 }
 
-void toneStart(const String &tone, bool fadeIn) {
+void toneStart(const String &tone, bool fadeIn, bool once) {
   chiming = false;
   talkStop();  // an alarm wins over live talk
   toneStop();
@@ -168,7 +172,14 @@ void toneStart(const String &tone, bool fadeIn) {
   ringingTone = tone;
   ringStart = millis();
   fading = fadeIn;
-  if (!openTone()) startBeep();
+  playOnce = once;
+  if (!openTone()) {
+    if (once) {  // a preview of a file that can't be read: just stop
+      toneStop();
+      return;
+    }
+    startBeep();
+  }
   Serial.println("Ringing: " + tone + (beeping ? "" : fromFile ? "" : " (streaming)"));
   netSend("{\"type\":\"ringing\"}");
 }
@@ -177,9 +188,10 @@ void toneStart(const String &tone, bool fadeIn) {
 // "stop" works mid-ring. Loops the tone until stopped or RING_MAX_MS.
 static void pumpTone() {
   if (!ringing) return;
-  if (millis() - ringStart > RING_MAX_MS) return toneStop();
+  if (!playOnce && millis() - ringStart > RING_MAX_MS) return toneStop();
   if (beeping) return pumpBeep();
-  if (toneBytesLeft < 2) {  // end of file: play it again
+  if (toneBytesLeft < 2) {  // end of file: play it again (or stop, for a preview)
+    if (playOnce) return toneStop();
     if (!openTone()) startBeep();
     return;
   }

@@ -19,3 +19,4 @@ void cacheCheckNow();                   // a read failed mid-play: check the car
 bool cacheReady();                      // built-in storage mounted
 void cardInfo(JsonObject o);            // SD card details for the page's storage table
 void sendCacheStatus();                 // {type:"cache", stored, wanted, card} for the page
+fs::FS *storage(const String &name);    // "card" or "builtin" (for the user's files), nullptr if not mounted

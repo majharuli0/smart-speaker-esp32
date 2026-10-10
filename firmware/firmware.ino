@@ -17,6 +17,7 @@
 #include "timesync.h"
 #include "alarms.h"
 #include "tonecache.h"
+#include "files.h"
 #include "ota.h"
 #include "health.h"
 
@@ -57,6 +58,7 @@ static void onCommand(uint8_t *payload, size_t length) {
   else if (cmd == "doorbell") chimeStart();
   else if (cmd == "ota_start") otaStart(doc);
   else if (cmd == "reset_wifi") resetWifi();
+  else if (cmd.startsWith("files_")) filesCommand(doc);
 }
 
 static void onAudio(uint8_t *payload, size_t length) { talkPush(payload, length); }
@@ -83,6 +85,7 @@ void loop() {
   timeLoop();
   alarmsLoop();
   cacheLoop();
+  filesLoop();
   otaLoop();
 
   // Let core 1's idle task run, so CPU load reads true (and the chip runs cooler).

@@ -85,7 +85,7 @@ Everything runs locally first (Postgres in Docker) and moves to the cloud later.
 - **Tooling:** Swagger at `/api/docs`; `GET /api/v1/health`; ESLint + Prettier; GitHub Actions running lint + unit + e2e (with a Postgres service).
 - **Done when:** register → login → `me` → refresh → logout works in the e2e tests, and Swagger shows them.
 
-### M2 Devices, MQTT bridge and all current features (backend)
+### M2 Devices, MQTT bridge and all current features (backend)  🟡 *code done 2026-10-10 (24 e2e tests); check with the real speaker pending*
 Port `backend/server.js` into Nest modules, reusing its logic and tests as the spec:
 
 | Module | Contents |

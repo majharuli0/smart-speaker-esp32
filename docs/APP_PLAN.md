@@ -139,6 +139,20 @@ Port `backend/server.js` into Nest modules, reusing its logic and tests as the s
 - The push token is stored on the `Session` at login.
 - **Pushes for:** doorbell ring, missed alarm, device offline for more than 10 min, crash restart.
 
+### M7 Building units at home (no factory)
+Replaces the one `DEVICE_SECRET` shared by every speaker (a cracked speaker would reveal every speaker's code) with a secret per unit, written on this PC.
+- **`make-unit` script** (one USB cable, ~2 minutes per unit):
+  1. flash the firmware;
+  2. read the UID from the serial port;
+  3. generate a random per-unit secret and write it to the unit over USB;
+  4. register the unit in the backend;
+  5. produce the label (PNG/PDF).
+- **Firmware:** keeps the per-unit secret in its storage, and accepts it over USB only once (before registration). The label code and MQTT password are derived from it.
+- **Backend:** a list of units built (UID, build date, firmware). It stores only hashes of each unit's code and MQTT password. **Only registered units may connect to the broker.**
+- **Label:** QR `SS:<UID>:<code>`, plus the same in text (`ID 2884 8564 09FC · Code c39c b687`), for when the camera can't scan.
+- **App and web:** separate **Speaker ID** and **Setup code** fields as the camera fallback (spaces and case ignored). An admin page lists units and reprints a label.
+- **Later, for real production:** flash encryption and secure boot, so the secret can't be read out of the chip, and signed firmware updates.
+
 ### Then
 - ✅ Retire `backend/` and `web/` from this repo, once the new backend + web reach parity (M2–M3) and the data has been migrated. *(done 2026-10-10; they're in git history)*
 - Cloud deployment (Oracle VM: docker compose + Caddy for HTTPS) when it's available again.

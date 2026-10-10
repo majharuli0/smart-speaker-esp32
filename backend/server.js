@@ -219,7 +219,7 @@ function toneInfo(name) {
 function alarmsFor(deviceId) {
   const list = alarms
     .filter((a) => a.deviceId === deviceId)
-    .map(({ id, time, days, tone, enabled }) => ({ id, time, days, tone, enabled }));
+    .map(({ id, time, days, date, tone, enabled }) => ({ id, time, days, ...(date && { date }), tone, enabled }));
   const tones = [...new Set(list.map((a) => a.tone))].map(toneInfo).filter(Boolean);
   const version = crypto.createHash('sha1').update(JSON.stringify({ list, tones })).digest('hex').slice(0, 8);
   return { list, tones, version };
@@ -237,11 +237,17 @@ function alarmsMessage() {
   return { type: 'alarms', alarms, versions };
 }
 
+// A one-time alarm has a date ("2026-10-12") instead of weekdays
+const isDate = (d) => typeof d === 'string' && /^\d{4}-\d\d-\d\d$/.test(d) && !Number.isNaN(Date.parse(d));
+
 function saveAlarm(a) {
-  if (!/^\d\d:\d\d$/.test(a.time) || !Array.isArray(a.days) || !a.deviceId || !a.tone) return;
+  if (!/^\d\d:\d\d$/.test(a.time) || !a.deviceId || !a.tone) return;
+  const date = isDate(a.date) ? a.date : undefined;
+  const days = date ? [] : (Array.isArray(a.days) ? a.days : []).map(Number).filter((d) => d >= 0 && d <= 6);
+  if (!date && !days.length) return; // rings never
   const alarm = {
     id: a.id || crypto.randomUUID(), deviceId: a.deviceId, time: a.time,
-    days: a.days.map(Number).filter((d) => d >= 0 && d <= 6), tone: path.basename(a.tone), enabled: a.enabled !== false,
+    days, ...(date && { date }), tone: path.basename(a.tone), enabled: a.enabled !== false,
   };
   alarms = alarms.filter((x) => x.id !== alarm.id).concat(alarm);
   saveAlarms();
@@ -335,6 +341,11 @@ wss.on('connection', (ws) => {
     if (ws.role === 'browser') toDevice(msg.target, msg);
     else if (ws.role === 'device') {
       const tagged = { ...msg, deviceId: ws.deviceId };
+      // A one-time alarm has now rung: switch it off
+      if (msg.type === 'alarm_fired') {
+        const a = alarms.find((x) => x.id === msg.alarmId && x.deviceId === ws.deviceId);
+        if (a?.date && a.enabled) saveAlarm({ ...a, enabled: false });
+      }
       if (REPLAYED_REPORTS.includes(msg.type)) (ws.lastReports ??= {})[msg.type] = tagged;
       toBrowsers(tagged);
     }

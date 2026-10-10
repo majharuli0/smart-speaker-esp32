@@ -2,7 +2,7 @@
 
 How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.8.0` and backend `0.2.0`.
+**Version:** matches firmware `0.9.0` and backend `0.2.0`.
 
 ---
 
@@ -82,6 +82,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"blink", target}` | Lights the built-in LED for 300 ms |
 | `{type:"ring", target, tone}` | Plays `tone` now (the **Test tone** button). Same behaviour as an alarm. |
 | `{type:"stop", target}` | Stops ringing and talk |
+| `{type:"snooze", target}` | If ringing: stop now and ring the same tone again in **9 minutes** (fading in). Timed by the device, so it works offline. Replies `snoozed`. |
 | `{type:"talk_start", target}` / `{type:"talk_stop", target}` | See 3.3 and section 4 |
 | `{type:"volume", target, value}` | Sets volume 0–100 and saves it on the device, then replies with `volume` |
 | `{type:"volume", target}` | Only asks; the device replies with `volume` |
@@ -93,7 +94,7 @@ The server forwards any other browser message to the device named in `target`. I
 | Message | When |
 |---|---|
 | `{type:"timezone", tz, name}` | On connect, then every hour. `tz` is the POSIX rule the ESP32 uses, `name` the IANA zone. See section 8. |
-| `{type:"alarms_sync", version, alarms:[{id, time, days, tone, enabled}], tones:[{name, size, sha256}]}` | On connect, after any change to this device's alarms, and when a tone they use is re-uploaded. Only its own alarms, plus the tones they use (section 5). |
+| `{type:"alarms_sync", version, alarms:[{id, time, days, date?, tone, enabled}], tones:[{name, size, sha256}]}` | On connect, after any change to this device's alarms, and when a tone they use is re-uploaded. Only its own alarms, plus the tones they use (section 5). |
 | `{type:"talk_stop"}` | The browser that was talking closed its tab or lost its connection |
 | `{type:"ota_start", path, version, size, sha256}` | After a browser's `ota`. See section 9. |
 | `{type:"doorbell"}` | Someone rang: play the ding-dong |
@@ -105,6 +106,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"ringing"}` / `{type:"stopped"}` | A tone (or the built-in beep) starts / stops: Stop pressed, or the 60 s limit reached |
 | `{type:"alarms_ack", version, count}` | After every `alarms_sync`: the list is saved on the device |
 | `{type:"alarm_fired", alarmId, time}` | The device rang an alarm from its own clock |
+| `{type:"snoozed", until}` | After `snooze`: local time it will ring again (`"07:09"`), or `""` if the clock isn't set |
 | `{type:"ota", state, progress?, error?, version}` | Update progress: `downloading` (0–100, every 10%), `restarting`, then from the new version `done`, or `failed`. `rolled_back` means the new version failed to start and the device went back to `version`. |
 | `{type:"cache", stored, wanted, card}` | How many of its alarms' tones are stored on the device (on the card, built-in, or both), and whether a microSD card is in. After each sync, each finished download, and when a card is inserted or removed. |
 | `{type:"talking"}` / `{type:"talk_stopped"}` | Talk playback starts / ends |
@@ -138,13 +140,15 @@ Alarms **ring on the device**, from its own clock and time zone, so they work wi
 ```json
 { "id": "uuid", "deviceId": "esp32-…", "time": "07:00", "days": [1,2,3,4,5],
   "tone": "wake.wav", "enabled": true }
+// one-time: { …, "days": [], "date": "2026-10-12", … }
 ```
 
 | Field | Rule |
 |---|---|
 | `id` | Created by the server when missing |
 | `time` | `HH:MM`, 24-hour, in the **device's** time zone (section 8); must match `^dd:dd$` |
-| `days` | Weekdays, `0` = Sunday … `6` = Saturday; other numbers are dropped |
+| `days` | Weekdays, `0` = Sunday … `6` = Saturday; other numbers are dropped. Empty for a one-time alarm. |
+| `date` | Optional `YYYY-MM-DD`: a **one-time** alarm that rings on that date only (`days` is then ignored). When the device reports `alarm_fired` for it, the server sets `enabled:false`. An alarm needs a valid `date` or at least one weekday. |
 | `tone` | A file in the tone library. Only the file name is kept (paths are stripped). |
 | `enabled` | Defaults to `true` |
 
@@ -160,6 +164,7 @@ device: saves the list in flash → alarms_ack {version, count}
 **Ringing (on the device):**
 - It checks the list once per minute, right as the minute starts, **only after its clock is set** (`timeValid`). So an alarm never rings at a wrong time, and never twice in the same minute.
 - If several alarms are due in the same minute, the first one wins.
+- **Fade-in:** alarms (and snooze re-rings) start at 10% of the set volume and rise to full over **30 s**. **Test tone** plays at full volume straight away.
 - It plays the tone **from its own storage** if stored, looping with no gap. Otherwise it streams it over HTTP, downloading it again on each loop. Either way it rings until `stop`, or for **60 s** at most.
 - If the tone **can't be downloaded** (no network, server down, file missing, or 3 s timeout), it plays a **built-in beep** (880 Hz, 0.25 s on / off) instead of staying silent.
 - **Stored tones:** `tones` in `alarms_sync` lists every tone the device's alarms use. The device:

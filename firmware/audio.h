@@ -10,7 +10,7 @@ void setVolume(int v);
 void sendVolume();  // report it to the server
 
 // Ringing: streams tone from the server, loops it until stopped or RING_MAX_MS
-void toneStart(const String &tone);
+void toneStart(const String &tone, bool fadeIn = false);  // fadeIn: alarms start quiet and rise
 void toneStop();
 
 // Doorbell: a built-in ding-dong, played once (skipped if an alarm or talk is playing)
@@ -22,4 +22,6 @@ void talkPush(const uint8_t *data, size_t length);
 void talkFinish();  // play out what's buffered, then stop
 void talkStop();    // stop now
 
+bool isRinging();
+String ringingToneName();
 bool audioBusy();   // a tone or talk is playing (don't start slow work like mounting a card)

@@ -23,6 +23,7 @@ static int32_t toneBytesLeft = 0;
 static File toneFile;           // stored copy of the tone, when there is one
 static bool fromFile = false;
 static unsigned long ringStart = 0;
+static bool fading = false;  // alarm: volume rises from 10% over FADE_IN_MS
 
 static int16_t talkBuf[TALK_BUF_SAMPLES];
 static size_t talkHead = 0, talkCount = 0;  // read position, samples buffered
@@ -81,7 +82,13 @@ static void i2sSetup() {
 // (blocks only while the queue is full, i.e. at playback speed)
 static void playSamples(const int16_t *mono, size_t n) {
   int16_t stereo[512];
-  for (size_t i = 0; i < n; i++) stereo[2 * i] = stereo[2 * i + 1] = applyVolume(mono[i]);
+  // Fading alarm: 10% of the set volume at first, full after FADE_IN_MS
+  int32_t fade = 256;
+  if (fading && ringing) {
+    unsigned long t = millis() - ringStart;
+    fade = t >= FADE_IN_MS ? 256 : 26 + (int32_t)(230 * t / FADE_IN_MS);
+  }
+  for (size_t i = 0; i < n; i++) stereo[2 * i] = stereo[2 * i + 1] = (int32_t)applyVolume(mono[i]) * fade >> 8;
   size_t written;
   i2s_write(I2S_PORT, stereo, n * 4, &written, portMAX_DELAY);
 }
@@ -150,13 +157,14 @@ void toneStop() {
   netSend("{\"type\":\"stopped\"}");
 }
 
-void toneStart(const String &tone) {
+void toneStart(const String &tone, bool fadeIn) {
   chiming = false;
   talkStop();  // an alarm wins over live talk
   toneStop();
   ringing = true;
   ringingTone = tone;
   ringStart = millis();
+  fading = fadeIn;
   if (!openTone()) startBeep();
   Serial.println("Ringing: " + tone + (beeping ? "" : fromFile ? "" : " (streaming)"));
   netSend("{\"type\":\"ringing\"}");
@@ -299,3 +307,5 @@ void audioLoop() {
 }
 
 bool audioBusy() { return ringing || talking || chiming; }
+bool isRinging() { return ringing; }
+String ringingToneName() { return ringingTone; }

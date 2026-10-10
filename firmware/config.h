@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.8.0"
+#define FW_VERSION "0.9.0"
 
 // ---- Server ----
 #define SERVER_MDNS_NAME "led-server"  // server.js answers for led-server.local
@@ -34,6 +34,8 @@
 #define DEFAULT_VOLUME 70     // 0-100, used until the user changes it
 #define RING_MAX_MS 60000     // stop ringing after 1 minute if nobody presses Stop
 #define MAX_ALARMS 20         // alarms stored on the device (saved in settings storage)
+#define SNOOZE_MS (9 * 60 * 1000UL)  // snooze rings again after 9 minutes
+#define FADE_IN_MS 30000      // alarms rise from 10% to full volume over 30 s
 #define TONE_TIMEOUT_MS 3000  // give up downloading a tone after this and beep instead
 
 // Tones stored on the device (in the 9.9 MB "ffat" area) so alarms play the real tone offline

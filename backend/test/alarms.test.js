@@ -127,3 +127,43 @@ test('the page is told the same version the device receives', async () => {
   await clear(br);
   dev.close(); br.close();
 });
+
+test('one-time alarms: a date instead of weekdays, switched off once they ring', async () => {
+  const br = await browser(server);
+  const dev = await device(server, 'esp32-a8');
+  await online(br, 'esp32-a8');
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a8', time: '06:00', days: [1, 2], date: '2026-12-25', tone: 'x.wav' } });
+  const sync = await dev.waitFor((m) => m.type === 'alarms_sync' && m.alarms.length === 1);
+  assert.deepEqual([sync.alarms[0].date, sync.alarms[0].days, sync.alarms[0].enabled], ['2026-12-25', [], true],
+    'a date replaces the weekdays');
+
+  dev.sendJson({ type: 'alarm_fired', alarmId: sync.alarms[0].id, time: '06:00' });
+  const off = await dev.waitFor((m) => m.type === 'alarms_sync' && m.alarms[0]?.enabled === false);
+  assert.equal(off.alarms[0].date, '2026-12-25');
+  await clear(br);
+  dev.close(); br.close();
+});
+
+test('an alarm with neither weekdays nor a valid date is refused', async () => {
+  const br = await browser(server);
+  await br.waitFor((m) => m.type === 'alarms');
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a9', time: '06:00', days: [], tone: 'x.wav' } });
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a9', time: '06:00', days: [], date: '2026-13-45', tone: 'x.wav' } });
+  await sleep(200);
+  assert.equal(latestAlarms(br).filter((a) => a.deviceId === 'esp32-a9').length, 0);
+  br.close();
+});
+
+test('repeating alarms are not switched off when they ring', async () => {
+  const br = await browser(server);
+  const dev = await device(server, 'esp32-a10');
+  await online(br, 'esp32-a10');
+  br.sendJson({ type: 'alarm_save', alarm: { deviceId: 'esp32-a10', time: '06:00', days: [3], tone: 'x.wav' } });
+  const sync = await dev.waitFor((m) => m.type === 'alarms_sync' && m.alarms.length === 1);
+  dev.messages.length = 0;
+  dev.sendJson({ type: 'alarm_fired', alarmId: sync.alarms[0].id, time: '06:00' });
+  await sleep(200);
+  assert.equal(dev.messages.filter((m) => m.type === 'alarms_sync').length, 0);
+  await clear(br);
+  dev.close(); br.close();
+});

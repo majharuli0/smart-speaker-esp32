@@ -40,6 +40,7 @@ static void onCommand(uint8_t *payload, size_t length) {
   if (cmd == "blink") blink();
   else if (cmd == "ring") toneStart(doc["tone"] | "");
   else if (cmd == "stop") { toneStop(); talkStop(); }
+  else if (cmd == "snooze") alarmsSnooze();
   else if (cmd == "talk_start") talkStart();
   else if (cmd == "talk_stop") talkFinish();  // finish what's buffered, then stop
   else if (cmd == "volume") {                 // with "value": set it; without: just report it

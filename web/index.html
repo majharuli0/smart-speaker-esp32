@@ -105,6 +105,8 @@
       if (el) el.innerHTML = statsHtml(msg);
     } else if (msg.type === 'ringing' || msg.type === 'stopped') {
       setStatus(msg.deviceId, msg.type === 'ringing' ? '🔔 ringing' : '');
+    } else if (msg.type === 'snoozed') {
+      setStatus(msg.deviceId, `😴 snoozed${msg.until ? ` until ${esc(msg.until)}` : ''}`);
     } else if (msg.type === 'talking' || msg.type === 'talk_stopped') {
       setStatus(msg.deviceId, msg.type === 'talking' ? '🎙 talking' : '');
     } else if (msg.type === 'talk_denied') {
@@ -279,6 +281,7 @@
             <button data-cmd="blink">Blink</button>
             <button data-cmd="test">Test tone</button>
             <button data-cmd="stop">Stop</button>
+            <button data-cmd="snooze" title="Stop ringing; ring again in 9 minutes">Snooze</button>
             <button data-talk>Hold to talk</button>
             <button data-cmd="bell" title="Ring this device's doorbell (a test ring)">🔔 Doorbell</button>
             <a href="${bellLink(id)}" target="_blank" title="The page visitors open (for a QR code at the door)">visitor link</a>
@@ -294,13 +297,14 @@
           <ul class="alarms">${alarms.map((a) => `
             <li data-alarm="${esc(a.id)}">
               <input type="checkbox" data-cmd="toggle" title="Enabled" ${a.enabled ? 'checked' : ''}>
-              <span><b>${esc(a.time)}</b> ${a.days.map((d) => DAYS[d]).join(' ')} · ${esc(a.tone)}</span>
+              <span><b>${esc(a.time)}</b> ${a.date ? `once, ${esc(a.date)}${a.enabled ? '' : ' (done)'}` : a.days.map((d) => DAYS[d]).join(' ')} · ${esc(a.tone)}</span>
               <button data-cmd="delete">Delete</button>
             </li>`).join('')}
           </ul>
           <div class="muted" id="sync-${esc(id)}">${syncHtml(id)}</div>
           <div class="row add">
             <input type="time"> ${dayBoxes}
+            <label title="Pick a date for a one-time alarm (weekdays are then ignored)">or once on <input type="date" data-date></label>
             <select>${toneOptions}</select>
             <button data-cmd="add">Add alarm</button>
           </div>
@@ -329,6 +333,7 @@
     if (cmd === 'blink') send({ type: 'blink', target: id });
     if (cmd === 'test') tone ? send({ type: 'ring', target: id, tone }) : alert('Upload a tone first');
     if (cmd === 'stop') send({ type: 'stop', target: id });
+    if (cmd === 'snooze') send({ type: 'snooze', target: id });
     if (cmd === 'reset' && confirm(`${uidOf(id)} will forget its Wi-Fi and reopen its setup hotspot. Continue?`)) {
       send({ type: 'reset_wifi', target: id });
     }
@@ -337,8 +342,9 @@
     if (cmd === 'add') {
       const time = add.querySelector('[type=time]').value;
       const days = [...add.querySelectorAll('[type=checkbox]:checked')].map((c) => Number(c.value));
-      if (!time || !days.length || !tone) return alert('Pick a time, at least one day, and a tone.');
-      send({ type: 'alarm_save', alarm: { deviceId: id, time, days, tone } });
+      const date = add.querySelector('[data-date]').value;  // one-time alarm: replaces the weekdays
+      if (!time || !tone || (!date && !days.length)) return alert('Pick a time, a tone, and at least one day or a date.');
+      send({ type: 'alarm_save', alarm: date ? { deviceId: id, time, days: [], date, tone } : { deviceId: id, time, days, tone } });
     }
   });
 

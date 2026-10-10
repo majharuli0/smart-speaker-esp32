@@ -5,6 +5,7 @@ backend/alarms.json
 backend/tones/
 backend/devices.json
 backend/firmware/
+backend/events.json
 
 # Local backend settings (copy from backend/.env.example)
 backend/.env

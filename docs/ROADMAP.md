@@ -65,7 +65,7 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
   - **Alarms never depend on the card:** if it's missing or unreadable at ring time, play from `ffat`, then streaming, then the beep.
   - **Page:** an "SD card" row in the storage table (size, used, card type), "no card" when empty.
   - **Done when:** an alarm plays its tone from the card offline; pulling the card out mid-ring falls back without a crash; re-inserting it is picked up without a restart.
-- [ ] **1.5 Built-in sounds.** Ding-dong and beep generated in code, no files needed, so they always work.
+- [x] **1.5 Built-in sounds.** A ding-dong (two bell strikes, generated in code) for the doorbell, and the 880 Hz beep used when an alarm tone can't be found. No files needed, so they always work.
 
 **Physical interface**
 - [ ] **1.6 Buttons and LED.** Buttons (e.g. GPIO 7, 15, 16): press for stop/snooze, a doorbell button, and a 10 s hold for factory reset. Onboard RGB LED (GPIO 48) states: setup, connecting, online, ringing, error. *(Skipped for now: no buttons fitted yet.)*
@@ -78,7 +78,7 @@ One person builds everything, so the phases run **in order, one at a time**. Tic
 - [x] **1.11 Updates over Wi-Fi (OTA).** Upload `firmware.ino.bin` on the page; the server reads board + version from a marker in the file and keeps the newest per board. A device updates on request: download, SHA-256 check, image check, restart. The new version must reach the server within 3 min or the bootloader rolls back. Image signing comes with secure boot in 5.4.
 
 **New features**
-- [ ] **1.12 Doorbell.** Rings from the button, a Bluetooth characteristic (NimBLE) or a QR link. 10 s cooldown, and the event goes to the cloud so the owner gets notified.
+- [x] **1.12 Doorbell (web).** 🔔 button on the owner's page and a visitor page (`bell.html?d=<id>`, for a QR code at the door). The device plays the built-in ding-dong; 10 s cooldown; every ring is logged and shown, with a banner and an optional system notification. **Still to do:** a physical button (with 1.6) and ringing over Bluetooth.
 - [ ] **1.13 Microphone.** INMP441 on the second I2S port. Streams from the device to the browser so the owner can answer the doorbell, and is the base for voice commands.
 
 **Reliability**

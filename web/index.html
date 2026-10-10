@@ -62,7 +62,7 @@
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const MAX_TONE_SECONDS = 30;
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {}, alarmVersions: {}, acked: {}, cache: {}, firmware: {} };
+  const state = { devices: [], alarms: [], tones: [], status: {}, volume: {}, stats: {}, partitions: {}, alarmVersions: {}, acked: {}, cache: {}, firmware: {}, events: [], lanUrl: null };
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
   const uidOf = (id) => id.replace('esp32-', '').toUpperCase(); // display only; commands use id
@@ -80,7 +80,7 @@
 
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
-    if (['devices', 'alarms', 'tones', 'firmware'].includes(msg.type)) {
+    if (['devices', 'alarms', 'tones', 'firmware', 'events'].includes(msg.type)) {
       state[msg.type] = msg[msg.type];
       if (msg.type === 'alarms') state.alarmVersions = msg.versions || {};
       render();
@@ -110,6 +110,16 @@
     } else if (msg.type === 'talk_denied') {
       stopTalk();
       alert(msg.reason === 'busy' ? 'Someone else is already talking to this device.' : 'Device is offline.');
+    } else if (msg.type === 'server') {
+      state.lanUrl = msg.lanUrl;  // the address a visitor's phone can reach
+      render();
+    } else if (msg.type === 'event') {
+      state.events = [msg.event, ...state.events].slice(0, 50);
+      const el = document.getElementById(`bell-${msg.event.deviceId}`);
+      if (el) el.innerHTML = bellLogHtml(msg.event.deviceId);
+      if (msg.event.type === 'doorbell') doorbellNotice(msg.event);
+    } else if (msg.type === 'doorbell_result') {
+      setStatus(msg.deviceId, msg.reason === 'cooldown' ? `🔔 just rang; wait ${Number(msg.retryIn) || 10} s` : '🔔 doorbell: device offline');
     } else if (msg.type === 'ota') {
       const text = {
         downloading: `⬇ updating firmware ${Number(msg.progress) || 0}%`,
@@ -228,6 +238,26 @@
     return `${alarmsLine} · ${stored === wanted ? '🎵' : '⏳'} ${stored} of ${wanted} tone${wanted === 1 ? '' : 's'} stored on the device${c.card ? ' (SD card + built-in)' : ''}${stored === wanted ? '' : ' (downloading…)'}`;
   }
 
+  // ---- Doorbell ----
+  const clock = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  // The server's network address, not "localhost": the visitor opens this on their own phone
+  const bellLink = (id) => `${state.lanUrl || `http://${serverHost}`}/bell.html?d=${encodeURIComponent(id)}`;
+
+  function bellLogHtml(id) {
+    const rings = state.events.filter((e) => e.type === 'doorbell' && e.deviceId === id).slice(0, 3);
+    if (!rings.length) return '';
+    return '🔔 Doorbell: ' + rings.map((e) =>
+      `${esc(clock(e.at))} ${e.source === 'visitor' ? 'visitor' : 'test'}${e.delivered ? '' : ' (device offline)'}`).join(' · ');
+  }
+
+  function doorbellNotice(e) {
+    if (e.source !== 'visitor') return;  // your own test rings don't need an alert
+    $('notice').textContent = `🔔 Someone is at the door (${uidOf(e.deviceId)}, ${clock(e.at)}). Use Hold to talk to answer.`;
+    document.title = '🔔 Doorbell!';
+    setTimeout(() => { document.title = 'LED Demo'; }, 15000);
+    if ('Notification' in window && Notification.permission === 'granted') new Notification('Someone is at the door', { body: uidOf(e.deviceId) });
+  }
+
   function render() {
     $('fwlist').innerHTML = Object.values(state.firmware)
       .map((f) => `<li>${esc(f.board)}: <b>${esc(f.version)}</b> <span class="muted">(${size(Number(f.size) || 0)}, uploaded ${esc(new Date(f.uploaded).toLocaleString())})</span></li>`)
@@ -250,12 +280,15 @@
             <button data-cmd="test">Test tone</button>
             <button data-cmd="stop">Stop</button>
             <button data-talk>Hold to talk</button>
+            <button data-cmd="bell" title="Ring this device's doorbell (a test ring)">🔔 Doorbell</button>
+            <a href="${bellLink(id)}" target="_blank" title="The page visitors open (for a QR code at the door)">visitor link</a>
             <button data-cmd="reset">Reset Wi-Fi</button>
           </div>
           <div class="row">
             🔊 <input type="range" min="0" max="100" data-volume value="${state.volume[id] ?? 70}">
             <span class="vol">${state.volume[id] ?? '…'}%</span>
           </div>
+          <div class="muted" id="bell-${esc(id)}">${bellLogHtml(id)}</div>
           <div class="stats" id="stats-${esc(id)}">${statsHtml(state.stats[id])}</div>
           <div class="stats" id="parts-${esc(id)}">${partsHtml(state.partitions[id])}</div>
           <ul class="alarms">${alarms.map((a) => `
@@ -287,6 +320,11 @@
     if (cmd === 'settz') { e.preventDefault(); send({ type: 'set_timezone', target: id, tz }); }
     if (cmd === 'ota' && confirm(`Update ${uidOf(id)} over Wi-Fi? It restarts when done (about 30 s).`)) {
       send({ type: 'ota', target: id });
+    }
+    if (cmd === 'bell') {
+      send({ type: 'doorbell_ring', target: id });
+      // Ask once, so a visitor's ring can show a system notification while this tab is in the background
+      if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
     }
     if (cmd === 'blink') send({ type: 'blink', target: id });
     if (cmd === 'test') tone ? send({ type: 'ring', target: id, tone }) : alert('Upload a tone first');

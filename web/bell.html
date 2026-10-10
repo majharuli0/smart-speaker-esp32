@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doorbell</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+         align-items: center; justify-content: center; gap: 1.5rem; background: #f8fafc; color: #111827; padding: 1rem; text-align: center; }
+  button { width: min(70vw, 260px); height: min(70vw, 260px); border-radius: 50%; border: none; font-size: 1.6rem;
+           background: #f59e0b; color: #fff; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15); cursor: pointer; }
+  button:active { transform: scale(0.97); }
+  button:disabled { background: #9ca3af; cursor: default; }
+  #msg { min-height: 1.5em; font-size: 1.1rem; }
+</style>
+</head>
+<body>
+  <h1>Doorbell</h1>
+  <button id="ring">🔔<br>Ring</button>
+  <p id="msg"></p>
+
+<script>
+  // Opened from the link (or QR code) at the door: bell.html?d=<device id>
+  const deviceId = new URLSearchParams(location.search).get('d') || '';
+  const btn = document.getElementById('ring');
+  const msg = document.getElementById('msg');
+  if (!deviceId) { btn.disabled = true; msg.textContent = 'This doorbell link is incomplete.'; }
+
+  btn.onclick = async () => {
+    btn.disabled = true;
+    msg.textContent = 'Ringing…';
+    let wait = 10;
+    try {
+      const res = await fetch(`/bell/${encodeURIComponent(deviceId)}`, { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) msg.textContent = '✓ The bell rang. Someone will be with you shortly.';
+      else if (data.reason === 'cooldown') { wait = data.retryIn; msg.textContent = 'Already rang. Please wait a moment.'; }
+      else if (data.reason === 'offline') msg.textContent = 'The doorbell is offline right now, sorry. Please knock.';
+      else msg.textContent = 'This doorbell link is not valid.';
+    } catch {
+      msg.textContent = 'Could not reach the doorbell. Please knock.';
+    }
+    setTimeout(() => { btn.disabled = !deviceId; }, wait * 1000);  // matches the server's 10 s cooldown
+  };
+</script>
+</body>
+</html>

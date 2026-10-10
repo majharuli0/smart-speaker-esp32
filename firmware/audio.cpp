@@ -17,6 +17,8 @@ static bool ringing = false;
 static String ringingTone;
 static bool beeping = false;  // built-in beep instead of the tone
 static uint32_t beepSample = 0;
+static bool chiming = false;  // doorbell ding-dong playing
+static uint32_t chimeSample = 0;
 static int32_t toneBytesLeft = 0;
 static File toneFile;           // stored copy of the tone, when there is one
 static bool fromFile = false;
@@ -149,6 +151,7 @@ void toneStop() {
 }
 
 void toneStart(const String &tone) {
+  chiming = false;
   talkStop();  // an alarm wins over live talk
   toneStop();
   ringing = true;
@@ -209,6 +212,7 @@ void talkStop() {
 }
 
 void talkStart() {
+  chiming = false;
   toneStop();
   talkStop();
   talking = true;
@@ -256,9 +260,42 @@ static void pumpTalk() {
   talkLastPlayed = millis();
 }
 
+// ---- Doorbell chime ----
+
+// One bell strike: the note plus a slightly inharmonic overtone (what makes a
+// bell sound like a bell, not a beep), fading out
+static float bell(float hz, float t) {
+  if (t < 0) return 0;
+  return (sinf(2 * PI * hz * t) + 0.35f * sinf(2 * PI * hz * 2.76f * t)) * expf(-3.5f * t);
+}
+
+// "Ding" (E5) then "dong" (C5) half a second later; built in, so it needs no file or network
+void chimeStart() {
+  if (ringing || talking) return;  // an alarm or talk is playing: don't talk over it
+  chiming = true;
+  chimeSample = 0;
+}
+
+static void pumpChime() {
+  if (!chiming) return;
+  const uint32_t length = SAMPLE_RATE * 2;  // 2 s, by when the dong has faded
+  int16_t mono[256];
+  for (int i = 0; i < 256; i++, chimeSample++) {
+    float t = (float)chimeSample / SAMPLE_RATE;
+    float v = 0.5f * bell(659.25f, t) + 0.5f * bell(523.25f, t - 0.55f);
+    mono[i] = (int16_t)(constrain(v, -1.0f, 1.0f) * 20000);
+  }
+  playSamples(mono, 256);
+  if (chimeSample >= length) {
+    chiming = false;
+    i2s_zero_dma_buffer(I2S_PORT);
+  }
+}
+
 void audioLoop() {
   pumpTone();
   pumpTalk();
+  pumpChime();
 }
 
-bool audioBusy() { return ringing || talking; }
+bool audioBusy() { return ringing || talking || chiming; }

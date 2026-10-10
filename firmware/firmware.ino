@@ -49,6 +49,7 @@ static void onCommand(uint8_t *payload, size_t length) {
   else if (cmd == "partitions") sendPartitions();
   else if (cmd == "alarms_sync") { alarmsSync(doc); cacheSync(doc["tones"]); }
   else if (cmd == "timezone") setTimezone(doc["tz"] | "", doc["name"] | "");
+  else if (cmd == "doorbell") chimeStart();
   else if (cmd == "ota_start") otaStart(doc);
   else if (cmd == "reset_wifi") resetWifi();
 }

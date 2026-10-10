@@ -2,7 +2,7 @@
 
 How the ESP32, the server and the web page talk to each other. This is the single reference: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.7.4` and backend `0.2.0`.
+**Version:** matches firmware `0.8.0` and backend `0.2.0`.
 
 ---
 
@@ -17,6 +17,8 @@ How the ESP32, the server and the web page talk to each other. This is the singl
 | Mic processor | `GET /mic-worklet.js` | Browser (hold to talk) |
 | Firmware upload | `POST /firmware` | Browser |
 | Firmware download | `GET /firmware/<board>.bin` | Device (while updating) |
+| Visitor doorbell page | `GET /bell.html?d=<deviceId>` | Visitor's phone (link or QR code at the door) |
+| Ring the doorbell | `POST /bell/<deviceId>` | Visitor page. See section 10. |
 | Server discovery | mDNS: `led-server.local` → the server's LAN IP (A record) | Device, at boot |
 
 - The device looks up `led-server.local` once at boot, and keeps retrying every second until it's found. It then keeps a WebSocket open to that IP, reconnecting every 3 s if it drops.
@@ -41,7 +43,7 @@ All text messages are JSON objects with a `type`. The only binary messages are t
 | From | Message | Server's response |
 |---|---|---|
 | Device | `{type:"hello", role:"device", deviceId, fw, board}` | Registers the device, then sends `devices` to all browsers. The device follows up with `volume` and `partitions`. |
-| Browser | `{type:"hello", role:"browser"}` | Sends that browser `devices`, `alarms`, `tones` and `firmware` |
+| Browser | `{type:"hello", role:"browser"}` | Sends that browser `devices`, `alarms`, `tones`, `firmware`, `events`, `server`, and each online device's latest status reports |
 
 If a device reconnects before its old connection closes, the new connection replaces the old one. The device stays online.
 
@@ -54,6 +56,10 @@ If a device reconnects before its old connection closes, the new connection repl
 | `{type:"tones", tones:["name.wav", ...]}` | On browser hello, and after an upload |
 | `{type:"talk_denied", deviceId, reason:"busy"\|"offline"}` | Only to the browser whose `talk_start` was refused |
 | `{type:"firmware", firmware:{board: {board, version, size, sha256, uploaded}}}` | On browser hello, and after a firmware upload. The newest file per board. |
+| `{type:"events", events:[Event, ...]}` | On browser hello: the newest 50 doorbell rings |
+| `{type:"event", event:Event}` | A new doorbell ring. `Event = {type:"doorbell", deviceId, source:"visitor"\|"page", at, delivered}` |
+| `{type:"server", lanUrl}` | On browser hello: this server's network address (`http://192.168.x.x:3000`), for links other devices open. `null` if it has no network. |
+| `{type:"doorbell_result", deviceId, ok:false, reason, retryIn?}` | Only to a page whose `doorbell_ring` was refused: `cooldown` or `offline` |
 
 ### 3.3 Browser → server (handled by the server, not relayed)
 
@@ -64,6 +70,7 @@ If a device reconnects before its old connection closes, the new connection repl
 | `{type:"talk_start", target}` | Starts a talk session if nobody else is talking to `target` and it's online. Otherwise replies with `talk_denied`. On success it's also relayed to the device. |
 | `{type:"talk_stop", target}` | Ends the session; also relayed to the device |
 | `{type:"ota", target}` | Update `target` to the newest firmware for its board: sends it `ota_start`. If there's no file for its board, or it's offline, replies `{type:"ota", deviceId, state:"failed", error}`. |
+| `{type:"doorbell_ring", target}` | Ring that device's doorbell (the page's 🔔 button). Same rules as the visitor page (section 10). |
 | `{type:"set_timezone", target, tz}` | Saves an IANA zone name (e.g. `Asia/Dhaka`) for that device and sends it a `timezone`. Unknown names are ignored. |
 
 ### 3.4 Browser → device (relayed as-is to `target`)
@@ -89,6 +96,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"alarms_sync", version, alarms:[{id, time, days, tone, enabled}], tones:[{name, size, sha256}]}` | On connect, after any change to this device's alarms, and when a tone they use is re-uploaded. Only its own alarms, plus the tones they use (section 5). |
 | `{type:"talk_stop"}` | The browser that was talking closed its tab or lost its connection |
 | `{type:"ota_start", path, version, size, sha256}` | After a browser's `ota`. See section 9. |
+| `{type:"doorbell"}` | Someone rang: play the ding-dong |
 
 ### 3.6 Device → browsers (relayed to all browsers, with `deviceId` added)
 
@@ -242,3 +250,13 @@ device: saves the list in flash → alarms_ack {version, count}
   Audio stops during the update. The device does nothing else for the few seconds it takes.
 - **Rollback:** the new version starts **on probation**. It becomes permanent once it connects to the server (`ota` `done`). If it doesn't within **3 minutes**, or it crashes and restarts, the bootloader starts the previous version, which reports `rolled_back` once on its next connect.
 - **Not yet:** signed firmware. It needs secure boot, which comes with the factory setup (roadmap 5.4).
+
+---
+
+## 10. Doorbell
+
+- **Ringing:** from the owner's page (`doorbell_ring`) or the visitor page (`POST /bell/<deviceId>`, opened from a link or QR code at the door). Only real device IDs (`esp32-` + 12 hex) are accepted.
+- **Cooldown:** one ring per device per **10 s**. Extra rings get `429` / `doorbell_result` with `retryIn` (seconds), and the visitor page disables its button for that long.
+- **Device:** `doorbell` plays a built-in **ding-dong**: two bell strikes, E5 then C5, about 2 s, at the device's volume. It's generated in code, so it needs no file or network. It's skipped if an alarm or talk is already playing.
+- **Log:** every ring, delivered or not, is saved newest-first in `events.json` (`DATA_DIR`, last 100) and announced to all pages as `event`. Pages show the last 3 per device. A visitor's ring shows a banner and changes the tab title, plus a system notification if the page was allowed to send them (asked on the first 🔔 button press).
+- **Not yet:** a physical button and ringing over Bluetooth (roadmap 1.6 / 1.12).

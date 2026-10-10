@@ -13,6 +13,9 @@ void sendVolume();  // report it to the server
 void toneStart(const String &tone);
 void toneStop();
 
+// Doorbell: a built-in ding-dong, played once (skipped if an alarm or talk is playing)
+void chimeStart();
+
 // Live talk from the browser (16 kHz 16-bit mono PCM)
 void talkStart();
 void talkPush(const uint8_t *data, size_t length);

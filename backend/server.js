@@ -14,10 +14,35 @@ const TONES_DIR = path.join(DATA_DIR, 'tones');
 const ALARMS_FILE = path.join(DATA_DIR, 'alarms.json');
 const DEVICES_FILE = path.join(DATA_DIR, 'devices.json');
 const FIRMWARE_DIR = path.join(DATA_DIR, 'firmware'); // newest firmware per board: <board>.bin + <board>.json
+const EVENTS_FILE = path.join(DATA_DIR, 'events.json'); // doorbell rings, newest first
 // Time zone for devices that haven't been given one: this machine's (right for a local server)
 const DEFAULT_TZ = process.env.TZ_DEFAULT || Intl.DateTimeFormat().resolvedOptions().timeZone;
 fs.mkdirSync(TONES_DIR, { recursive: true });
 fs.mkdirSync(FIRMWARE_DIR, { recursive: true });
+
+// ---- Doorbell ----
+// Rung from the owner's page or the visitor page (web/bell.html). The device
+// plays a built-in ding-dong; every ring is logged and shown on the pages.
+const BELL_COOLDOWN_MS = 10000; // one ring per device per 10 s: stops button mashing
+const MAX_EVENTS = 100;
+let events = [];
+try { events = JSON.parse(fs.readFileSync(EVENTS_FILE, 'utf8')); } catch {}
+const saveEvents = () => fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2));
+const lastBell = {}; // deviceId -> ms of the last accepted ring
+
+function ringDoorbell(deviceId, source) {
+  const now = Date.now();
+  const since = now - (lastBell[deviceId] || 0);
+  if (since < BELL_COOLDOWN_MS) return { ok: false, reason: 'cooldown', retryIn: Math.ceil((BELL_COOLDOWN_MS - since) / 1000) };
+  lastBell[deviceId] = now;
+  const delivered = toDevice(deviceId, { type: 'doorbell' });
+  const event = { type: 'doorbell', deviceId, source, at: new Date(now).toISOString(), delivered };
+  events = [event, ...events].slice(0, MAX_EVENTS);
+  saveEvents();
+  console.log(`Doorbell ${deviceId} (${source}): ${delivered ? 'rang' : 'device offline'}`);
+  toBrowsers({ type: 'event', event });
+  return delivered ? { ok: true } : { ok: false, reason: 'offline' };
+}
 
 // [{ id, deviceId, time: "07:00" (device's local time), days: [0..6, Sun=0], tone, enabled }]
 let alarms = [];
@@ -104,6 +129,14 @@ app.post('/firmware', express.raw({ type: () => true, limit: MAX_FIRMWARE }), (r
 });
 app.use('/firmware', express.static(FIRMWARE_DIR, { extensions: false }));
 
+// Visitor page's Ring button. Only real device IDs; the cooldown limits spam.
+app.post('/bell/:deviceId', (req, res) => {
+  const id = req.params.deviceId;
+  if (!/^esp32-[0-9a-f]{12}$/.test(id)) return res.status(404).json({ ok: false, reason: 'unknown' });
+  const result = ringDoorbell(id, 'visitor');
+  res.status(result.ok ? 200 : result.reason === 'cooldown' ? 429 : 503).json(result);
+});
+
 // PORT=0 picks a free port (tests use this); log the real one
 const server = app.listen(PORT, (err) => {
   if (err) throw err; // e.g. port already in use
@@ -114,21 +147,26 @@ const server = app.listen(PORT, (err) => {
 // the ESP32 finds the server without a hardcoded address. The UDP "connect"
 // just asks the OS which interface reaches the LAN (sends nothing); pinning
 // mDNS to it keeps replies off WSL/Hyper-V virtual adapters.
-function advertiseMdns() {
-  const probe = dgram.createSocket('udp4');
-  probe.connect(80, '8.8.8.8', () => {
-    const ip = probe.address().address;
-    probe.close();
-    const mdns = require('multicast-dns')({ interface: ip });
-    mdns.on('query', (query) => {
-      if (query.questions.some((q) => q.name === MDNS_HOST && (q.type === 'A' || q.type === 'ANY'))) {
-        mdns.respond({ answers: [{ name: MDNS_HOST, type: 'A', ttl: 120, data: ip }] });
-      }
-    });
-    console.log(`Advertising ${MDNS_HOST} -> ${ip}`);
+// This machine's LAN address: for mDNS, and for links other devices open (the
+// visitor doorbell page), since "localhost" only works on this machine.
+let lanIp = null;
+function advertiseMdns(ip) {
+  const mdns = require('multicast-dns')({ interface: ip });
+  mdns.on('query', (query) => {
+    if (query.questions.some((q) => q.name === MDNS_HOST && (q.type === 'A' || q.type === 'ANY'))) {
+      mdns.respond({ answers: [{ name: MDNS_HOST, type: 'A', ttl: 120, data: ip }] });
+    }
   });
+  console.log(`Advertising ${MDNS_HOST} -> ${ip}`);
 }
-if (MDNS_ENABLED) advertiseMdns();
+const probe = dgram.createSocket('udp4');
+probe.on('error', () => {}); // no network: links fall back to the page's own address
+probe.connect(80, '8.8.8.8', () => {
+  lanIp = probe.address().address;
+  probe.close();
+  if (MDNS_ENABLED) advertiseMdns(lanIp);
+});
+const lanUrl = () => (lanIp ? `http://${lanIp}:${server.address().port}` : null);
 
 const wss = new WebSocketServer({ server });
 const devices = new Map(); // deviceId -> ws
@@ -248,6 +286,8 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify(alarmsMessage()));
         ws.send(JSON.stringify({ type: 'tones', tones: listTones() }));
         ws.send(JSON.stringify({ type: 'firmware', firmware: firmwareList() }));
+        ws.send(JSON.stringify({ type: 'events', events: events.slice(0, 50) }));
+        ws.send(JSON.stringify({ type: 'server', lanUrl: lanUrl() }));
         // Devices send these once (on connect or on change), so replay them for a page opened later
         devices.forEach((dev) => Object.values(dev.lastReports || {}).forEach((m) => ws.send(JSON.stringify(m))));
       }
@@ -256,6 +296,13 @@ wss.on('connection', (ws) => {
 
     if (ws.role === 'browser' && msg.type === 'alarm_save') return saveAlarm(msg.alarm || {});
     if (ws.role === 'browser' && msg.type === 'alarm_delete') return deleteAlarm(msg.id);
+
+    // Doorbell button on the owner's page
+    if (ws.role === 'browser' && msg.type === 'doorbell_ring') {
+      const result = ringDoorbell(msg.target, 'page');
+      if (!result.ok) ws.send(JSON.stringify({ type: 'doorbell_result', deviceId: msg.target, ...result }));
+      return;
+    }
 
     // Update a device to the newest firmware for its board
     if (ws.role === 'browser' && msg.type === 'ota') {

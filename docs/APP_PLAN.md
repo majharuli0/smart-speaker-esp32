@@ -153,6 +153,28 @@ Replaces the one `DEVICE_SECRET` shared by every speaker (a cracked speaker woul
 - **App and web:** separate **Speaker ID** and **Setup code** fields as the camera fallback (spaces and case ignored). An admin page lists units and reprints a label.
 - **Later, for real production:** flash encryption and secure boot, so the secret can't be read out of the chip, and signed firmware updates.
 
+### M8 Must-fix before real users
+1. **Wi-Fi recovery (firmware).** Today, if the router or Wi-Fi password changes, the speaker can never connect again: the only way into Bluetooth setup is "Reset Wi-Fi", which needs the speaker online. Fix: if the saved Wi-Fi fails for ~5 min, also open Bluetooth setup while still retrying.
+2. **Forgot password.** A reset email (backend sends mail), plus email verification and "delete my account".
+3. **Family sharing.** The owner invites others by email; roles are owner and member. Members control the speaker; only the owner removes it or manages members.
+4. **Clock without internet.** A DS3231 RTC module (coin cell), so alarms ring after a power cut even when the internet is down. Needs hardware.
+
+### M9 Files on the speaker (replaces "Tones")
+A simple file manager per speaker, in the web and the app:
+- **Storage:** two tabs, **Built-in** (~10 MB) and **SD card**, each with a usage bar. Folders with breadcrumbs.
+- **Actions:** new folder, rename, delete (folders with their contents, after confirming), move between folders and storages, play on the speaker, use as an alarm sound.
+- **Upload** any audio into the current folder and storage. The server converts it to 16 kHz mono WAV (limit raised to ~10 min per file, ~1.9 MB/min); the speaker downloads it into place and reports progress.
+- **The speaker's storage is the truth.** The speaker reports its file list; the backend keeps the last known list, so it can be shown while the speaker is offline. Changes need the speaker online. Paths are checked on both sides (no `..`).
+- **Alarms** point to a file on the speaker. A missing file falls back to the built-in chime. Alarm-tone storage moves to a hidden folder users can't touch.
+- **Removed:** the account-wide Tones library on the server. To use a sound on two speakers, upload it to each.
+- **Later:** MP3 playback on the speaker (about 8× more audio in the same space).
+
+### Hardware to add (next parts order)
+DS3231 RTC, 2 buttons (stop/snooze and doorbell; a long press resets), a status LED, and an INMP441 microphone (for the visitor to talk back, and later the voice assistant).
+
+### Later
+Alarm extras (fade-in, snooze length, labels, history), doorbell quiet hours, hold-to-talk in the app, talk latency tuning, two-way doorbell calls (WebRTC), AI voice assistant.
+
 ### Then
 - ✅ Retire `backend/` and `web/` from this repo, once the new backend + web reach parity (M2–M3) and the data has been migrated. *(done 2026-10-10; they're in git history)*
 - Cloud deployment (Oracle VM: docker compose + Caddy for HTTPS) when it's available again.

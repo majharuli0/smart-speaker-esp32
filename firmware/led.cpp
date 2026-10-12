@@ -17,6 +17,7 @@ static const Look STARTING = {255, 255, 255, STEADY, 0};
 static const Look UPDATING = {0, 0, 255, BLINK, 200};
 static const Look IDENTIFY = {255, 255, 255, BLINK, 300};
 static const Look RINGING = {255, 70, 0, PULSE, 1500};
+static const Look MUSIC = {0, 255, 60, PULSE, 3000};  // slow green
 static const Look TALKING = {160, 0, 255, STEADY, 0};
 static const Look DOORBELL = {0, 255, 255, BLINK, 250};
 static const Look SETUP = {0, 0, 255, BLINK, 2000};
@@ -38,6 +39,7 @@ static Look pick(unsigned long now) {
   if (online) lastOnline = now;
   if (otaRunning()) look = UPDATING;
   else if ((long)(identifyUntil - now) > 0) look = IDENTIFY;
+  else if (isMusic()) look = MUSIC;
   else if (isRinging()) look = RINGING;
   else if (isTalking()) look = TALKING;
   else if (isChiming()) look = DOORBELL;

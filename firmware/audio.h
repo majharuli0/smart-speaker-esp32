@@ -10,9 +10,14 @@ void setVolume(int v);
 void sendVolume();  // report it to the server
 
 // Ringing: a stored copy of the tone, or one of the user's files ("card:/Music/Rain.wav"),
-// or streamed from the server. Loops until stopped or RING_MAX_MS; once: plays the
-// whole sound one time (previews from the file manager). fadeIn: alarms start quiet and rise.
-void toneStart(const String &tone, bool fadeIn = false, bool once = false);
+// or streamed from the server. Loops until stopped or RING_MAX_MS. music (played from
+// the file manager): the whole file, then again until Stop if repeat is on, else once.
+// fadeIn: alarms start quiet and rise.
+void toneStart(const String &tone, bool fadeIn = false, bool music = false);
+
+// Music repeat on/off, saved in flash like the volume
+void setRepeat(bool on);
+void sendRepeat();  // report it to the server
 void toneStop();
 
 // Doorbell: a built-in ding-dong, played once (skipped if an alarm or talk is playing)
@@ -25,6 +30,7 @@ void talkFinish();  // play out what's buffered, then stop
 void talkStop();    // stop now
 
 bool isRinging();
+bool isMusic();     // the ringing is music from the file manager, not an alarm
 bool isTalking();
 bool isChiming();
 String ringingToneName();

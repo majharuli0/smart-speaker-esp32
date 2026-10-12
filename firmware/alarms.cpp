@@ -72,7 +72,7 @@ void alarmsSync(JsonDocument &msg) {
 }
 
 void alarmsSnooze() {
-  if (!isRinging()) return;
+  if (!isRinging() || isMusic()) return;  // snooze is for alarms, not music
   snoozeTone = ringingToneName();
   toneStop();
   snoozed = true;

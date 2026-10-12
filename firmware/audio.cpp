@@ -25,7 +25,9 @@ static File toneFile;           // stored copy of the tone, when there is one
 static bool fromFile = false;
 static unsigned long ringStart = 0;
 static bool fading = false;  // alarm: volume rises from 10% over FADE_IN_MS
-static bool playOnce = false;  // a preview: play the file once, then stop
+static bool music = false;    // played from the file manager: no time limit, repeat or once
+static bool repeatOn = true;  // music starts again at the end (saved setting)
+static int readRetries = 0;   // reopening a file after a failed read
 
 static int16_t talkBuf[TALK_BUF_SAMPLES];
 static size_t talkHead = 0, talkCount = 0;  // read position, samples buffered
@@ -52,6 +54,15 @@ void setVolume(int v) {
 
 void sendVolume() {
   netSend("{\"type\":\"volume\",\"value\":" + String(volume) + "}");
+}
+
+void setRepeat(bool on) {
+  repeatOn = on;
+  prefs.putBool("repeat", on);
+}
+
+void sendRepeat() {
+  netSend(repeatOn ? "{\"type\":\"repeat\",\"on\":true}" : "{\"type\":\"repeat\",\"on\":false}");
 }
 
 // ---- Speaker ----
@@ -99,6 +110,7 @@ void audioSetup() {
   i2sSetup();
   prefs.begin("audio");
   applyVolumeSetting(prefs.getUChar("vol", DEFAULT_VOLUME));
+  repeatOn = prefs.getBool("repeat", true);
 }
 
 // ---- Ringing a tone ----
@@ -164,7 +176,7 @@ void toneStop() {
   netSend("{\"type\":\"stopped\"}");
 }
 
-void toneStart(const String &tone, bool fadeIn, bool once) {
+void toneStart(const String &tone, bool fadeIn, bool playMusic) {
   chiming = false;
   talkStop();  // an alarm wins over live talk
   toneStop();
@@ -172,9 +184,10 @@ void toneStart(const String &tone, bool fadeIn, bool once) {
   ringingTone = tone;
   ringStart = millis();
   fading = fadeIn;
-  playOnce = once;
+  music = playMusic;
+  readRetries = 0;
   if (!openTone()) {
-    if (once) {  // a preview of a file that can't be read: just stop
+    if (music) {  // a file that can't be read: just stop
       toneStop();
       return;
     }
@@ -185,14 +198,18 @@ void toneStart(const String &tone, bool fadeIn, bool once) {
 }
 
 // One small chunk per call so the WebSocket keeps being serviced and
-// "stop" works mid-ring. Loops the tone until stopped or RING_MAX_MS.
+// "stop" works mid-ring. Loops the tone until stopped or RING_MAX_MS (alarms);
+// music has no time limit.
 static void pumpTone() {
   if (!ringing) return;
-  if (!playOnce && millis() - ringStart > RING_MAX_MS) return toneStop();
+  if (!music && millis() - ringStart > RING_MAX_MS) return toneStop();
   if (beeping) return pumpBeep();
-  if (toneBytesLeft < 2) {  // end of file: play it again (or stop, for a preview)
-    if (playOnce) return toneStop();
-    if (!openTone()) startBeep();
+  if (toneBytesLeft < 2) {  // end of file: play it again (music only if repeat is on)
+    if (music && !repeatOn) return toneStop();
+    if (!openTone()) {
+      if (music) return toneStop();
+      startBeep();
+    }
     return;
   }
 
@@ -200,11 +217,17 @@ static void pumpTone() {
     int16_t mono[256];
     size_t want = min(sizeof(mono), (size_t)toneBytesLeft) & ~(size_t)1;
     int samples = toneFile.read((uint8_t *)mono, want) / 2;
-    if (samples <= 0) {  // read failed before the end: card pulled out? Check it, then reopen
-      cacheCheckNow();    // (from built-in storage if the card is gone)
-      toneBytesLeft = 0;
+    if (samples <= 0) {  // read failed before the end: a card hiccup, or pulled out?
+      cacheCheckNow();    // check it, then carry on from the same place (a tone may
+      int32_t left = toneBytesLeft;  // reopen from built-in storage if the card is gone)
+      if (++readRetries <= 3 && openTone()) {
+        if (fromFile && left < toneBytesLeft && toneFile.seek(toneFile.size() - left)) toneBytesLeft = left;
+        return;
+      }
+      toneBytesLeft = 0;  // give up on this pass: treated as the end of the file
       return;
     }
+    readRetries = 0;
     toneBytesLeft -= samples * 2;
     playSamples(mono, samples);
     return;
@@ -323,6 +346,7 @@ void audioLoop() {
 
 bool audioBusy() { return ringing || talking || chiming; }
 bool isRinging() { return ringing; }
+bool isMusic() { return ringing && music; }
 bool isTalking() { return talking; }
 bool isChiming() { return chiming; }
 String ringingToneName() { return ringingTone; }

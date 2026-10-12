@@ -89,12 +89,13 @@ Status light (RGB LED, common cathode: the long leg to GND; each color through i
 | Green, dim (10 s, then off) | Online |
 | Red, slow blink | Can't reach the server for 30 s (alarms still ring) |
 | Orange, pulsing | Alarm ringing |
+| Green, slow pulse | Music playing |
 | Purple | Someone is talking through it |
 | Cyan, blinking | Doorbell |
 | Blue, fast blink | Firmware updating: don't unplug |
 | White, flashing | "Find my speaker" (Blink button) |
 
-The most important one shows when several apply (top of this order wins: updating, find, ringing, talking, doorbell, setup, offline, connecting, online).
+The most important one shows when several apply (top of this order wins: updating, find, music, ringing, talking, doorbell, setup, offline, connecting, online).
 
 microSD card module (SPI, powered from **3V3** unless the module has its own regulator; card formatted FAT32):
 

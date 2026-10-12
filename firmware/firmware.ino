@@ -26,6 +26,7 @@
 static void onConnected() {
   netSend("{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\",\"fw\":\"" FW_VERSION "\",\"board\":\"" CONFIG_IDF_TARGET "\"}");
   sendVolume();
+  sendRepeat();
   sendPartitions();
   otaReport();
   healthReport();
@@ -46,6 +47,10 @@ static void onCommand(uint8_t *payload, size_t length) {
   else if (cmd == "volume") {                 // with "value": set it; without: just report it
     if (doc["value"].is<int>()) setVolume(doc["value"].as<int>());
     sendVolume();
+  }
+  else if (cmd == "repeat") {                 // with "on": set it; without: just report it
+    if (doc["on"].is<bool>()) setRepeat(doc["on"].as<bool>());
+    sendRepeat();
   }
   else if (cmd == "partitions") sendPartitions();
   else if (cmd == "watch") setWatching(doc["on"] | false);

@@ -117,6 +117,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"talk_start", target}` / `{type:"talk_stop", target}` | See 3.3 and section 4 |
 | `{type:"volume", target, value}` | Sets volume 0–100 and saves it on the device, then replies with `volume` |
 | `{type:"volume", target}` | Only asks; the device replies with `volume` |
+| `{type:"repeat", on}` | Music played from the file manager starts again at the end (`true`, the default) or plays once; saved on the device, which replies with `repeat`. Without `on`, it only asks. |
 | `{type:"partitions", target}` | Asks for the flash layout; the device replies with `partitions` |
 | `{type:"reset_wifi"}` | Forgets Wi-Fi and restarts into Bluetooth setup (`SS-XXXX`, firmware 0.12.0+) |
 
@@ -144,6 +145,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"cache", stored, wanted, card}` | How many of its alarms' tones are stored on the device (on the card, built-in, or both), and whether a microSD card is in. After each sync, each finished download, and when a card is inserted or removed. |
 | `{type:"talking"}` / `{type:"talk_stopped"}` | Talk playback starts / ends |
 | `{type:"volume", value}` | On connect, and after any `volume` request |
+| `{type:"repeat", on}` | On connect, and after any `repeat` request |
 | `{type:"stats", ...}` | Every **2 s while a page is open**, otherwise every **5 min** (keeps MQTT traffic low). See 6.1. |
 | `{type:"partitions", ...}` | On connect, and when asked. Measured once at boot. See 6.2. |
 

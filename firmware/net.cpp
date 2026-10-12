@@ -346,6 +346,7 @@ void netLoop() {
 }
 
 bool netConnected() { return brokerUp && serverUp; }
+bool netInSetup() { return bluetoothOn; }
 String serverHttp() { return httpBase; }
 
 void netSend(const char *json) {

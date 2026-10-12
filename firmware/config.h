@@ -1,9 +1,9 @@
 // All the settings you might change, in one place.
 #pragma once
-#include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*, LED_BUILTIN)
+#include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.15.0"
+#define FW_VERSION "0.16.0"
 
 // ---- Broker address and device secret: in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -34,7 +34,15 @@
 #define I2S_BCLK_GPIO 5
 #define I2S_LRC_GPIO  6
 #define I2S_PORT I2S_NUM_0
-// LED_BUILTIN is the board's RGB LED (GPIO 48), defined by the S3 core
+// Status light: RGB LED, common cathode (long leg to GND), each color through 300 Ω.
+// GPIO 15/16/17 come right after the amp pins on the same header.
+#define LED_R_GPIO 15
+#define LED_G_GPIO 16
+#define LED_B_GPIO 17
+#define LED_STARTING_MS 1500   // white at power-on
+#define LED_ONLINE_MS   10000  // green this long after anything else showed, then dark
+#define LED_OFFLINE_MS  30000  // can't reach the server this long: red instead of yellow
+#define LED_IDENTIFY_MS 4000   // "find my speaker" flashing
 
 // ---- Audio ----
 #define SAMPLE_RATE 16000     // tones are converted to 16 kHz 16-bit mono WAV by the web page

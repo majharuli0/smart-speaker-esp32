@@ -17,6 +17,7 @@ struct NetHandlers {
 void netSetup(const NetHandlers &handlers);
 void netLoop();
 bool netConnected();                 // broker connected and the server online
+bool netInSetup();                   // waiting for Wi-Fi details over Bluetooth
 void netSend(const String &json);    // to the server (ss/dev/<id>/evt)
 void netSend(const char *json);
 String serverHttp();                 // base URL for downloads, e.g. "http://192.168.0.102:3000", "" if unknown

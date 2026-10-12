@@ -110,7 +110,7 @@ The server forwards any other browser message to the device named in `target`. I
 
 | Message | Device does |
 |---|---|
-| `{type:"blink", target}` | Lights the built-in LED for 300 ms |
+| `{type:"blink", target}` | "Find my speaker": the status light flashes white for 4 s |
 | `{type:"ring", target, tone}` | Plays `tone` now (the **Test tone** button). Same behaviour as an alarm. |
 | `{type:"stop", target}` | Stops ringing and talk |
 | `{type:"snooze", target}` | If ringing: stop now and ring the same tone again in **9 minutes** (fading in). Timed by the device, so it works offline. Replies `snoozed`. |

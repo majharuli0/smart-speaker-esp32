@@ -72,6 +72,30 @@ Amp wiring (MAX98357A; GAIN and SD unconnected):
 | VIN | 5V |
 | GND | GND |
 
+Status light (RGB LED, common cathode: the long leg to GND; each color through its own 300 Ω resistor):
+
+| LED leg | ESP32-S3 |
+|---|---|
+| Red | GPIO 15 |
+| Green | GPIO 16 |
+| Blue | GPIO 17 |
+| Long leg | GND |
+
+| Light | Meaning |
+|---|---|
+| White, brief | Starting |
+| Blue, slow blink | Waiting for Wi-Fi setup over Bluetooth |
+| Yellow, blinking | Connecting to Wi-Fi / the server |
+| Green, dim (10 s, then off) | Online |
+| Red, slow blink | Can't reach the server for 30 s (alarms still ring) |
+| Orange, pulsing | Alarm ringing |
+| Purple | Someone is talking through it |
+| Cyan, blinking | Doorbell |
+| Blue, fast blink | Firmware updating: don't unplug |
+| White, flashing | "Find my speaker" (Blink button) |
+
+The most important one shows when several apply (top of this order wins: updating, find, ringing, talking, doorbell, setup, offline, connecting, online).
+
 microSD card module (SPI, powered from **3V3** unless the module has its own regulator; card formatted FAT32):
 
 | SD module pin | ESP32-S3 |

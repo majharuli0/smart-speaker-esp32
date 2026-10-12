@@ -323,4 +323,6 @@ void audioLoop() {
 
 bool audioBusy() { return ringing || talking || chiming; }
 bool isRinging() { return ringing; }
+bool isTalking() { return talking; }
+bool isChiming() { return chiming; }
 String ringingToneName() { return ringingTone; }

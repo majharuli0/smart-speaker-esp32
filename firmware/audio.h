@@ -25,5 +25,7 @@ void talkFinish();  // play out what's buffered, then stop
 void talkStop();    // stop now
 
 bool isRinging();
+bool isTalking();
+bool isChiming();
 String ringingToneName();
 bool audioBusy();   // a tone or talk is playing (don't start slow work like mounting a card)

@@ -8,5 +8,6 @@
 void otaSetup();                     // prints the firmware marker; notes if we're on probation
 void otaLoop();                      // confirms the new version once connected, or rolls back
 void otaStart(JsonDocument &msg);    // ota_start from the server: download, check, install, restart
+bool otaRunning();                   // an update is downloading or installing
 void otaReport();                    // on connect: tell the page if an update just failed and rolled back
 const char *boardName();             // "esp32s3" / "esp32"

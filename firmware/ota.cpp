@@ -12,6 +12,7 @@
 // version without asking, and can refuse files that aren't this firmware.
 static const char FW_MARKER[] = "SSFW:" CONFIG_IDF_TARGET ":" FW_VERSION ":END";
 
+static volatile bool updating = false;  // an update is downloading or installing (read by the status light)
 static bool onProbation = false;  // running a new version that isn't confirmed yet
 
 // The Arduino core normally confirms every new version at boot. Returning
@@ -60,7 +61,10 @@ void otaReport() {
   if (esp_ota_get_last_invalid_partition()) report("rolled_back", -1, "the new firmware failed to start, so the device went back to this version");
 }
 
+bool otaRunning() { return updating; }
+
 static bool fail(const String &why) {
+  updating = false;
   Serial.println("Update failed: " + why);
   report("failed", -1, why);
   return false;
@@ -77,6 +81,7 @@ void otaStart(JsonDocument &msg) {
   talkStop();
   Serial.printf("Updating to %s (%u bytes)\n", (const char *)(msg["version"] | "?"), (unsigned)size);
   report("downloading", 0);
+  updating = true;
 
   HTTPClient http;
   http.setTimeout(10000);

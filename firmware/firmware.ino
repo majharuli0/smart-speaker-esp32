@@ -8,6 +8,7 @@
 //   tonecache - the tones those alarms use, stored on the device
 //   ota    - firmware updates over Wi-Fi, with automatic rollback
 //   health - restart reason, crash reports, and a watchdog against freezes
+//   led    - the RGB status light
 // Messages are documented in docs/protocol.md.
 #include <ArduinoJson.h>
 #include "config.h"
@@ -20,12 +21,7 @@
 #include "files.h"
 #include "ota.h"
 #include "health.h"
-
-static void blink() {
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(300);
-  digitalWrite(LED_BUILTIN, LOW);
-}
+#include "led.h"
 
 static void onConnected() {
   netSend("{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\",\"fw\":\"" FW_VERSION "\",\"board\":\"" CONFIG_IDF_TARGET "\"}");
@@ -41,7 +37,7 @@ static void onCommand(uint8_t *payload, size_t length) {
   String cmd = doc["type"] | "";
   Serial.println("Command: " + cmd);
 
-  if (cmd == "blink") blink();
+  if (cmd == "blink") ledIdentify();
   else if (cmd == "ring") toneStart(doc["tone"] | "");
   else if (cmd == "stop") { toneStop(); talkStop(); }
   else if (cmd == "snooze") alarmsSnooze();
@@ -68,7 +64,7 @@ void setup() {
   Serial.setDebugOutput(true);  // ESP32 core error messages to this (USB) port too
   healthSetup();
   otaSetup();
-  pinMode(LED_BUILTIN, OUTPUT);  // the board's RGB LED (GPIO 48)
+  ledSetup();
   audioSetup();
   cacheSetup();  // before statsSetup, which measures the storage it mounts
   statsSetup();

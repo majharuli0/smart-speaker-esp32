@@ -3,7 +3,7 @@
 #include <Arduino.h>
 
 extern String deviceId;   // "esp32-" + factory MAC, e.g. "esp32-2884856409fc"
-extern String devicePop;  // the code on its QR label "SS:<deviceId>:<pop>"
+extern String devicePop;  // the code on its QR label "SS:<UID>:<pop>": proves you have it when adding it remotely
 
 // Called from netLoop() (the main loop, never the MQTT task); set before netSetup()
 struct NetHandlers {
@@ -18,6 +18,7 @@ void netSetup(const NetHandlers &handlers);
 void netLoop();
 bool netConnected();                 // broker connected and the server online
 bool netInSetup();                   // waiting for Wi-Fi details over Bluetooth
+String netTakeClaim();               // the setup token the app sent over Bluetooth, once ("" if none)
 void netSend(const String &json);    // to the server (ss/dev/<id>/evt)
 void netSend(const char *json);
 String serverHttp();                 // base URL for downloads, e.g. "http://192.168.0.102:3000", "" if unknown

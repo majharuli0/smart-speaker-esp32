@@ -46,12 +46,29 @@ then press **Update** under the speaker's Health. If the new version can't reach
 
 At boot the serial monitor prints the speaker's UID and its label text: `QR label: SS:<UID>:<code>`.
 
+## Making a unit (one command)
+
+With a new ESP32-S3 on USB (Git Bash):
+
+```bash
+tools/make-unit.sh COM11          # wipe the chip, flash the firmware, make the label
+tools/make-unit.sh COM11 --keep   # same without wiping (keeps Wi-Fi, settings and files)
+```
+
+It reads the speaker ID from the chip, builds and flashes the firmware (cloud address and secret from
+`firmware/secrets.h`, which must match the backend's `DEVICE_SECRET`), writes the label
+(`tools/labels/<UID>.html`: QR + ID, 70 × 40 mm, opened for printing) and adds a line to
+`tools/units.csv`. On first start the speaker waits for Bluetooth setup and fetches the built-in tones
+from the server.
+
 ## 3. Wi-Fi setup (over Bluetooth)
 
-A speaker with no Wi-Fi saved advertises over Bluetooth as **`SS-XXXX`** (last 4 characters of its UID)
-and needs the code from its QR label.
+A speaker with no Wi-Fi saved advertises over Bluetooth as **`SS-XXXX`** (last 4 characters of its UID),
+with a blue blinking light.
 
-- **Phone app:** *Add a speaker* → scan the label → pick your Wi-Fi → password. It's added to your account.
+- **Phone app:** *Add a speaker* → scan the label (or type the speaker ID, the last 4 characters are
+  enough) → pick your Wi-Fi → password. It's added to your account. A typed ID only works with the phone
+  next to the speaker: the speaker itself confirms who set it up.
 - **For testing, Espressif's "ESP BLE Provisioning" app:** scan the QR code the serial monitor shows (in
   the app's settings, clear the device name prefix "PROV_").
 

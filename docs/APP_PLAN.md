@@ -139,7 +139,7 @@ Port `backend/server.js` into Nest modules, reusing its logic and tests as the s
 - The push token is stored on the `Session` at login.
 - **Pushes for:** doorbell ring, missed alarm, device offline for more than 10 min, crash restart.
 
-### M7 Building units at home (no factory)
+### M7 Building units at home (no factory)  🟡 *first part built 2026-10-13: `tools/make-unit.sh` (flash + label), adding by typed ID (firmware 0.17.0); per-unit secrets still to do*
 Replaces the one `DEVICE_SECRET` shared by every speaker (a cracked speaker would reveal every speaker's code) with a secret per unit, written on this PC.
 - **`make-unit` script** (one USB cable, ~2 minutes per unit):
   1. flash the firmware;

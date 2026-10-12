@@ -213,6 +213,33 @@ static bool hasSavedWifi() {
 static const uint8_t SETUP_SERVICE_UUID[16] = {0xb4, 0xdf, 0x5a, 0x1c, 0x3f, 0x6b, 0xf4, 0xbf,
                                                0xea, 0x4a, 0x82, 0x03, 0x04, 0x90, 0x1a, 0x02};
 
+// Who is setting this speaker up: the app writes a one-time token from the
+// server here (over the encrypted Bluetooth session). Once online, the speaker
+// passes it on, and the server adds the speaker to that person's account. So
+// adding a speaker needs a phone right next to it, not just its ID.
+static char claimToken[100];
+static volatile bool claimPending = false;
+
+static esp_err_t onClaimData(uint32_t, const uint8_t *in, ssize_t len, uint8_t **out, ssize_t *outLen, void *) {
+  bool ok = len > 0 && len < (ssize_t)sizeof(claimToken);
+  for (ssize_t i = 0; ok && i < len; i++) ok = isalnum(in[i]) || in[i] == '.' || in[i] == '-' || in[i] == '_';
+  if (ok) {
+    memcpy(claimToken, in, len);
+    claimToken[len] = 0;
+    claimPending = true;
+  }
+  const char *reply = ok ? "ok" : "bad";
+  *outLen = strlen(reply);
+  *out = (uint8_t *)strdup(reply);  // freed by the provisioning library
+  return *out ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+String netTakeClaim() {
+  if (!claimPending) return "";
+  claimPending = false;
+  return claimToken;
+}
+
 static void startBluetoothSetup() {
   if (bluetoothOn) return;
   WiFi.setSleep(true);  // Wi-Fi and Bluetooth share the radio: Wi-Fi must allow power saving
@@ -225,13 +252,17 @@ static void startBluetoothSetup() {
     return;
   }
   network_prov_scheme_ble_set_service_uuid((uint8_t *)SETUP_SERVICE_UUID);
-  if (network_prov_mgr_start_provisioning(NETWORK_PROV_SECURITY_1, devicePop.c_str(), setupName.c_str(), nullptr) !=
+  network_prov_mgr_endpoint_create("ss-claim");
+  // The session is encrypted (security 1); its code is the Bluetooth name itself,
+  // so the app can connect knowing only the last 4 characters of the UID
+  if (network_prov_mgr_start_provisioning(NETWORK_PROV_SECURITY_1, setupName.c_str(), setupName.c_str(), nullptr) !=
       ESP_OK) {
     network_prov_mgr_deinit();
     Serial.println("Wi-Fi setup: Bluetooth didn't start");
     return;
   }
-  WiFiProv.printQR(setupName.c_str(), devicePop.c_str(), "ble");  // for testing with Espressif's "ESP BLE Provisioning" app
+  network_prov_mgr_endpoint_register("ss-claim", onClaimData, nullptr);
+  WiFiProv.printQR(setupName.c_str(), setupName.c_str(), "ble");  // for testing with Espressif's "ESP BLE Provisioning" app
 }
 
 static void stopBluetoothSetup() { network_prov_mgr_deinit(); }  // safe to call twice

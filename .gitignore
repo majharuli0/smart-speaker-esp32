@@ -3,3 +3,6 @@ firmware/build/
 
 # Firmware secrets: broker address and device secret (copy firmware/secrets.example.h to firmware/secrets.h)
 firmware/secrets.h
+
+# Unit labels (the QR holds the setup code)
+tools/labels/

@@ -25,6 +25,8 @@
 
 static void onConnected() {
   netSend("{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\",\"fw\":\"" FW_VERSION "\",\"board\":\"" CONFIG_IDF_TARGET "\"}");
+  String claim = netTakeClaim();  // set up from the app over Bluetooth: add it to that account
+  if (claim.length()) netSend("{\"type\":\"claim\",\"token\":\"" + claim + "\"}");
   sendVolume();
   sendRepeat();
   sendPartitions();

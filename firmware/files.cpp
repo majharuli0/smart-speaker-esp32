@@ -177,7 +177,7 @@ static void startDownload(JsonDocument &msg, fs::FS &fs, const String &path) {
     return reply(msg, false, "couldn't download the file");
   }
   job.part = full(path) + ".part";
-  job.out = fs.open(job.part, "w");
+  job.out = fs.open(job.part, "w", true);  // true: makes missing folders, e.g. /Reminders
   if (!job.out) {
     http.end();
     return reply(msg, false, "couldn't write to this storage");
@@ -200,7 +200,7 @@ static void startCopy(JsonDocument &msg, fs::FS &from, const String &fromPath, f
   File src = from.open(full(fromPath));
   if (!src || src.isDirectory()) return reply(msg, false, "only files can move to the other storage");
   job.part = full(toPath) + ".part";
-  job.out = to.open(job.part, "w");
+  job.out = to.open(job.part, "w", true);
   if (!job.out) return reply(msg, false, "couldn't write to this storage");
   job.isCopy = true;
   job.src = src;

@@ -12,6 +12,7 @@ struct Alarm {
   uint8_t days;  // bit 0 = Sunday … bit 6 = Saturday (repeating alarms)
   String date;   // "2026-10-12" for a one-time alarm, else empty
   String tone;
+  bool fade;     // false: a spoken message, full volume from the first word
   bool enabled;
 };
 
@@ -22,8 +23,11 @@ static String version;
 
 // Snooze: ring the same tone again later. Timed by millis(), so it works offline.
 static String snoozeTone;
+static bool snoozeFade = true;
 static unsigned long snoozeAt = 0;
 static bool snoozed = false;
+static String firedTone;        // the alarm that rang last, so snooze rings it the same way
+static bool firedFade = true;
 
 // The list arrives as JSON; the same JSON is what's saved in flash
 static void load(const String &json) {
@@ -42,6 +46,7 @@ static void load(const String &json) {
     for (int d : a["days"].as<JsonArrayConst>()) if (d >= 0 && d <= 6) x.days |= 1 << d;
     x.date = a["date"] | "";
     x.tone = a["tone"] | "";
+    x.fade = a["fade"] | true;
     x.enabled = a["enabled"] | true;
   }
 }
@@ -74,6 +79,7 @@ void alarmsSync(JsonDocument &msg) {
 void alarmsSnooze() {
   if (!isRinging() || isMusic()) return;  // snooze is for alarms, not music
   snoozeTone = ringingToneName();
+  snoozeFade = snoozeTone == firedTone ? firedFade : true;
   toneStop();
   snoozed = true;
   snoozeAt = millis() + SNOOZE_MS;
@@ -89,7 +95,7 @@ void alarmsSnooze() {
 void alarmsLoop() {
   if (snoozed && (long)(millis() - snoozeAt) >= 0) {  // snooze is over: ring again
     snoozed = false;
-    toneStart(snoozeTone, true);
+    toneStart(snoozeTone, snoozeFade);
   }
 
   static unsigned long lastCheck = 0;
@@ -116,7 +122,9 @@ void alarmsLoop() {
     snprintf(hhmm, sizeof(hhmm), "%02d:%02d", a.hour, a.minute);
     Serial.printf("Alarm %s: ringing %s\n", hhmm, a.tone.c_str());
     snoozed = false;  // a new alarm replaces a pending snooze
-    toneStart(a.tone, true);
+    firedTone = a.tone;
+    firedFade = a.fade;
+    toneStart(a.tone, a.fade);
     netSend("{\"type\":\"alarm_fired\",\"alarmId\":\"" + a.id + "\",\"time\":\"" + hhmm + "\"}");
     break;  // one sound at a time; the first due alarm wins
   }

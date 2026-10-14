@@ -126,7 +126,7 @@ The server forwards any other browser message to the device named in `target`. I
 | Message | When |
 |---|---|
 | `{type:"timezone", tz, name}` | On connect, then every hour. `tz` is the POSIX rule the ESP32 uses, `name` the IANA zone. See section 8. |
-| `{type:"alarms_sync", version, alarms:[{id, time, days, date?, tone, enabled}], tones:[{name, size, sha256}]}` | On connect, after any change to this device's alarms, and when a tone they use is re-uploaded. Only its own alarms, plus the tones they use (section 5). |
+| `{type:"alarms_sync", version, alarms:[{id, time, days, date?, tone, fade?, enabled}], tones:[{name, size, sha256}]}` | On connect, after any change to this device's alarms, and when a tone they use is re-uploaded. Only its own alarms, plus the tones they use (section 5). |
 | `{type:"talk_stop"}` | The browser that was talking closed its tab or lost its connection |
 | `{type:"watch", on}` | On hello, and whenever the first page opens (`true`) or the last one closes (`false`). Sets the stats rate. |
 | `{type:"ota_start", path, version, size, sha256}` | After a browser's `ota`. See section 9. |
@@ -186,6 +186,7 @@ Alarms **ring on the device**, from its own clock and time zone, so they work wi
 | `days` | Weekdays, `0` = Sunday … `6` = Saturday; other numbers are dropped. Empty for a one-time alarm. |
 | `date` | Optional `YYYY-MM-DD`: a **one-time** alarm that rings on that date only (`days` is then ignored). When the device reports `alarm_fired` for it, the server sets `enabled:false`. An alarm needs a valid `date` or at least one weekday. |
 | `tone` | A file in the tone library. Only the file name is kept (paths are stripped). |
+| `fade` | Only sent as `false` (firmware 0.18.0+): a spoken message, such as a reminder recorded in the app. It plays at full volume from the first word, with no fade-in. Missing means `true`. |
 | `enabled` | Defaults to `true` |
 
 **Delivery:**
@@ -200,7 +201,7 @@ device: saves the list in flash → alarms_ack {version, count}
 **Ringing (on the device):**
 - It checks the list once per minute, right as the minute starts, **only after its clock is set** (`timeValid`). So an alarm never rings at a wrong time, and never twice in the same minute.
 - If several alarms are due in the same minute, the first one wins.
-- **Fade-in:** alarms (and snooze re-rings) start at 10% of the set volume and rise to full over **30 s**. **Test tone** plays at full volume straight away.
+- **Fade-in:** alarms (and snooze re-rings) start at 10% of the set volume and rise to full over **30 s**. **Test tone**, and alarms with `fade:false` (and their snooze re-rings), play at full volume straight away.
 - It plays the tone **from its own storage** if stored, looping with no gap. Otherwise it streams it over HTTP, downloading it again on each loop. Either way it rings until `stop`, or for **60 s** at most.
 - If the tone **can't be downloaded** (no network, server down, file missing, or 3 s timeout), it plays a **built-in beep** (880 Hz, 0.25 s on / off) instead of staying silent.
 - **Stored tones:** `tones` in `alarms_sync` lists every tone the device's alarms use. The device:

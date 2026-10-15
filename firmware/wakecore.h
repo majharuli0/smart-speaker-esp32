@@ -90,7 +90,7 @@ float distance(const Word &a, const Word &b);
 float score(const Word &word, const Word *takes, int count);
 
 // The match threshold for these takes (count >= 2): their average distance from
-// each other, scaled by sensitivity 1-10 (5 the default; higher wakes more easily).
+// each other, scaled by sensitivity 1-10 (5 the default: 1.35 x; higher wakes more easily).
 // spread: that average.
 float threshold(const Word *takes, int count, int sensitivity, float *spread);
 

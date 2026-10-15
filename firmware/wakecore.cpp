@@ -261,7 +261,10 @@ float threshold(const Word *takes, int count, int sensitivity, float *spread) {
   if (!pairs) return 0;  // nothing to match against
   if (sensitivity < 1) sensitivity = 1;
   if (sensitivity > 10) sensitivity = 10;
-  return sum / pairs * (0.75f + 0.05f * sensitivity);  // 5: the takes' own spread
+  // 5: 1.35 x the takes' own spread. Loose on purpose: the owner's genuine words
+  // scored up to 1.34 x (said later, from elsewhere in the room), and the AI
+  // checks every wake, so a near miss costs only a silent check
+  return sum / pairs * (1.0f + 0.07f * sensitivity);
 }
 
 }  // namespace wake

@@ -18,6 +18,7 @@ static const Look STARTING = {255, 255, 255, STEADY, 0};
 static const Look UPDATING = {0, 0, 255, BLINK, 200};
 static const Look IDENTIFY = {255, 255, 255, BLINK, 300};
 static const Look LISTENING = {255, 0, 120, PULSE, 1200};  // pink: the microphone is sending
+static const Look THINKING = {0, 90, 255, PULSE, 700};      // blue: the AI is working out its answer
 static const Look RINGING = {255, 70, 0, PULSE, 1500};
 static const Look MUSIC = {0, 255, 60, PULSE, 3000};  // slow green
 static const Look TALKING = {160, 0, 255, STEADY, 0};
@@ -40,7 +41,10 @@ static Look pick(unsigned long now) {
   bool online = netConnected();
   if (online) lastOnline = now;
   if (otaRunning()) look = UPDATING;
-  else if (micBusy()) look = LISTENING;  // always shown while the mic is on (privacy)
+  else if (micBusy()) {  // always shown while the mic is on (privacy)
+    MicState m = micState();
+    look = isTalking() ? TALKING : m == MIC_THINKING ? THINKING : LISTENING;
+  }
   else if ((long)(identifyUntil - now) > 0) look = IDENTIFY;
   else if (isMusic()) look = MUSIC;
   else if (isRinging()) look = RINGING;

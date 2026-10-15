@@ -19,6 +19,13 @@ static MicSession asked;  // set by micRecord (main loop), taken by the mic task
 static volatile bool askedNew = false;
 static volatile bool running = false;
 static volatile bool stopAsked = false;
+static volatile bool stopQuiet = false;
+// A conversation's turn: the person's (waiting for them, or them speaking), the
+// AI working out its answer, or the AI speaking
+enum Turn { WAITING, SPEAKING, THINKING, REPLYING };
+static volatile Turn turn = WAITING;
+static const uint32_t TURN_MAX_MS = 20000;   // a turn this long is ended anyway
+static const uint32_t THINK_MAX_MS = 12000;  // no answer this long: the person's turn again
 
 // The mic answers in one slot of each stereo frame (which one, its L/R pin
 // decides): both are read, and the louder one is kept
@@ -49,16 +56,18 @@ static bool portStart() {
 
 static float dbfs(float v) { return v > 0 ? 20 * log10f(v / 32768) : -120; }
 
-// The last few seconds the mic heard (PSRAM), so a request said straight after
-// the wake word isn't lost while the server gets ready: sent from where the
-// word ended, when the server's mic_record says afterWake
+// The last few seconds the mic heard (PSRAM). After the wake word the server's
+// mic_record says afterWake, and the recording starts where the word started:
+// the AI checks it really was the wake word (the speaker's own match is loose),
+// and a request said straight after it isn't lost while the server gets ready
 static const uint32_t RING = SAMPLE_RATE * 6;
 static int16_t *ring = nullptr;
 static float *bandRing = nullptr;  // the same, in the speech band (for judging speech)
 static volatile uint32_t written = 0;        // samples heard since power-on
-static volatile uint32_t wakeMark = 0;       // where the last wake word ended
+static volatile uint32_t wakeMark = 0;       // where the last wake word started
 static volatile unsigned long wakeTime = 0;  // and when it was heard (0: never)
 static const uint32_t WORD_END = SAMPLE_RATE * 45 / 100;  // a word is over after 450 ms of quiet
+static const uint32_t BEFORE_WORD = SAMPLE_RATE * 15 / 100;  // and a little before it, to be safe
 static const unsigned long AFTER_WAKE_MS = 4000;  // the server asks within this, or it's too old
 
 static bool wakeFresh() { return ring && bandRing && wakeTime && millis() - wakeTime < AFTER_WAKE_MS; }
@@ -91,7 +100,21 @@ static void micTask(void *) {
   int64_t levelSum = 0;
   uint32_t sessionCount = 0, levelCount = 0;
   int32_t levelPeak = 0;
+  uint32_t turnMs = 0;  // in this turn (waiting, speaking or thinking)
+  bool idleEnded = false;
   char json[360];
+
+  auto turnEvent = [&](const char *state) {
+    snprintf(json, sizeof(json), "{\"type\":\"turn\",\"state\":\"%s\",\"pieces\":%lu}", state,
+             (unsigned long)pieces);
+    netSendNow(json);
+  };
+  auto flush = [&]() {  // send the piece being filled now (the end of a turn)
+    if (!fill) return;
+    if (netSendMic((const uint8_t *)piece, fill * 2)) pieces++;
+    else dropped++;
+    fill = 0;
+  };
 
   // One sample of the session (and its speech-band value): sent, and judged speech or quiet
   auto capture = [&](int16_t y, float banded, bool over) {
@@ -114,9 +137,27 @@ static void micTask(void *) {
       if (power < floor * wake::QUIET_X) {
         if (heard) quietMs += 50;
       } else quietMs = 0;
-      if (s.endSilenceMs && heard && quietMs >= (uint32_t)s.endSilenceMs) silenceEnded = true;
+      if (s.conversation) {
+        turnMs += 50;
+        if (turn != SPEAKING && loudRun >= 2) {  // they speak (again, if the AI is still thinking)
+          turn = SPEAKING;
+          turnMs = quietMs = 0;
+          turnEvent("speaking");
+        } else if (turn == SPEAKING && (quietMs >= (uint32_t)s.endSilenceMs || turnMs >= TURN_MAX_MS)) {
+          flush();
+          turn = THINKING;
+          turnMs = 0;
+          turnEvent("done");
+        } else if (turn == WAITING && s.idleMs && turnMs >= (uint32_t)s.idleMs) {
+          idleEnded = true;  // nothing said on their turn: that's all
+        } else if (turn == THINKING && turnMs >= THINK_MAX_MS) {
+          turn = WAITING;  // no answer came: their turn again
+          turnMs = 0;
+          cueStart();
+        }
+      } else if (s.endSilenceMs && heard && quietMs >= (uint32_t)s.endSilenceMs) silenceEnded = true;
     }
-    if (s.live) return;
+    if (s.live || s.conversation) return;
     levelSum += (int64_t)y * y;
     levelPeak = max(levelPeak, abs((int32_t)y));
     if (++levelCount == SAMPLE_RATE / 4) {  // the live level meter, 4 times a second
@@ -140,6 +181,9 @@ static void micTask(void *) {
       heard = silenceEnded = false;
       sessionSum = 0;
       levelSum = levelPeak = sessionCount = levelCount = 0;
+      turn = WAITING;
+      turnMs = 0;
+      idleEnded = false;
       wakeSessionStart(s.wakeTake, s.wakeTest);
       // Straight after the wake word: from where it ended, at once
       if (s.afterWake && wakeFresh()) {
@@ -168,6 +212,16 @@ static void micTask(void *) {
       if (speakerQuiet) wakeInterrupt();
       speakerQuiet = 0;
     }
+    // A conversation: the AI speaking is its turn; when it's done, a beep, and
+    // it's the person's turn again
+    if (on && s.conversation) {
+      if (isTalking()) turn = REPLYING;
+      else if (turn == REPLYING && !audioBusy()) {
+        turn = WAITING;
+        turnMs = 0;
+        cueStart();
+      }
+    }
     // A recording starts after its cue (a call's room audio starts at once)
     if (on && !capturing) {
       if (isCueing()) gap = CUE_GAP;
@@ -193,7 +247,8 @@ static void micTask(void *) {
       bool echoFree = speakerQuiet >= ECHO;
       if (speakerQuiet < ECHO) speakerQuiet++;
       if (echoFree && wakeHear((int16_t)y)) {  // the wake word: it ended a moment ago
-        wakeMark = written > WORD_END ? written - WORD_END : 0;
+        uint32_t back = WORD_END + (uint32_t)wakeHeardFrames() * wake::HOP + BEFORE_WORD;
+        wakeMark = written > back ? written - back : 0;
         wakeTime = millis() | 1;
       }
 
@@ -204,20 +259,20 @@ static void micTask(void *) {
         windowCount = 0;
         floor = floor < 0 || power < floor ? power : floor * 1.023f;
       }
-      if (!on || !capturing || silenceEnded || total >= want) continue;
-      if (s.live && !echoFree) {  // the caller's voice is playing: send nothing
+      if (!on || !capturing || silenceEnded || idleEnded || total >= want) continue;
+      if ((s.live || s.conversation) && !echoFree) {  // the caller's or the AI's voice is playing: send nothing
         total++;
         continue;
       }
       capture((int16_t)y, banded, over);
     }
 
-    if (on && (stopAsked || silenceEnded || total >= want)) {
+    if (on && (stopAsked || silenceEnded || idleEnded || total >= want)) {
       if (fill) {  // the last, shorter piece
         if (netSendMic((const uint8_t *)piece, fill * 2)) pieces++;
         else dropped++;
       }
-      const char *endedBy = stopAsked ? "stop" : silenceEnded ? "silence" : "time";
+      const char *endedBy = stopAsked ? "stop" : silenceEnded ? "silence" : idleEnded ? "idle" : "time";
       int len = snprintf(json, sizeof(json),
                          "{\"type\":\"mic_done\",\"samples\":%lu,\"pieces\":%lu,\"dropped\":%lu,\"clipped\":%lu,"
                          "\"slot\":\"%s\",\"gainShift\":%d,\"speech\":%s,\"endedBy\":\"%s\",\"floorDb\":%.1f",
@@ -229,7 +284,9 @@ static void micTask(void *) {
       netSend(json);
       Serial.printf("Microphone session over (%s): %lu samples, %lu clipped\n", endedBy, (unsigned long)total,
                     (unsigned long)clipped);
+      if (s.conversation && !(stopAsked && stopQuiet)) cueStart(true);  // "that's all"
       on = false;
+      turn = WAITING;
       running = false;
     }
   }
@@ -255,15 +312,17 @@ bool micRecord(const MicSession &s) {
     return false;
   }
   asked = s;
-  asked.seconds = constrain(s.seconds, 1, s.live ? MIC_LIVE_MAX_S : MIC_TEST_MAX_S);
+  asked.seconds = constrain(s.seconds, 1, s.live || s.conversation ? MIC_LIVE_MAX_S : MIC_TEST_MAX_S);
   asked.endSilenceMs = s.live ? 0 : constrain(s.endSilenceMs, 0, 5000);
+  asked.idleMs = constrain(s.idleMs, 0, 60000);
   toneStop();               // a quiet room: nothing plays while it listens…
   if (!s.live) talkStop();  // …except, in a call, the caller
-  // "I'm listening", or for a call "the room can be heard now" (after the wake
-  // word it beeped already, and sends what was said since)
+  // "I'm listening", or for a call "the room can be heard now" (no beep after
+  // the wake word: it sends from the word on, and the server answers if it was)
   asked.afterWake = s.afterWake && wakeFresh();
   if ((asked.endSilenceMs || s.live) && !asked.afterWake) cueStart();
   stopAsked = false;
+  stopQuiet = false;
   running = true;
   askedNew = true;
   Serial.printf("Microphone session: up to %d s%s%s\n", asked.seconds, s.live ? ", a call" : "",
@@ -271,8 +330,15 @@ bool micRecord(const MicSession &s) {
   return true;
 }
 
-void micStop() {
-  if (running) stopAsked = true;
+void micStop(bool quiet) {
+  if (!running) return;
+  stopQuiet = quiet;
+  stopAsked = true;
 }
 
 bool micBusy() { return running; }
+
+MicState micState() {
+  if (!running) return MIC_OFF;
+  return turn == THINKING ? MIC_THINKING : MIC_LISTENING;
+}

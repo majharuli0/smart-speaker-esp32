@@ -5,7 +5,6 @@
 #include <new>
 #include "wakecore.h"
 #include "net.h"
-#include "audio.h"
 
 using wake::TAKES;
 
@@ -31,6 +30,7 @@ static float testScore = wake::NO_MATCH;
 static int testFrames = 0;
 static volatile int takeReady = 0;   // a new take to save (main loop)
 static volatile float matched = -1;  // a match to report (main loop)
+static volatile int matchedFrames = 0;  // its length
 static volatile unsigned long quietUntil = 0;  // no matching until then
 
 template <typename T> static T *make(int count) {
@@ -139,7 +139,6 @@ void wakeLoop() {
              (float)limit);
     matched = -1;
     Serial.println("Wake word heard");
-    if (netConnected()) cueStart();  // "I'm listening", at once: say the request now
     netSend(json);
   }
 }
@@ -165,9 +164,12 @@ bool wakeHear(int16_t sample) {
   if (score < limit * 1.3f) Serial.printf("Wake word? %.1f (threshold %.1f)\n", score, (float)limit);
   if (score > limit) return false;
   matched = score;
+  matchedFrames = w.n;
   quietUntil = millis() + 3000;
   return true;
 }
+
+int wakeHeardFrames() { return matchedFrames; }
 
 void wakeInterrupt() {
   if (listener) listener->interrupt();

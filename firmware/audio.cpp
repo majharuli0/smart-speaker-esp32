@@ -21,6 +21,7 @@ static uint32_t beepSample = 0;
 static bool chiming = false;  // doorbell ding-dong playing
 static uint32_t chimeSample = 0;
 static bool cueing = false;   // the "I'm listening" cue playing
+static bool cueFalling = false;  // …or the "that's all" one
 static uint32_t cueSample = 0;
 static int32_t toneBytesLeft = 0;
 static File toneFile;           // stored copy of the tone, when there is one
@@ -343,9 +344,10 @@ static void pumpChime() {
 // ---- "I'm listening" cue ----
 
 // Two short rising notes (A5, then E6), 0.26 s: the speaker is about to listen.
-// Built in, so it plays at once.
-void cueStart() {
+// Falling (E6, then A5): the conversation is over. Built in, so it plays at once.
+void cueStart(bool falling) {
   chiming = false;
+  cueFalling = falling;
   cueing = true;
   cueSample = 0;
 }
@@ -359,7 +361,8 @@ static void pumpCue() {
     bool second = t >= 0.13f;
     float local = second ? t - 0.13f : t;  // time into this note
     float env = cueSample >= length || (t >= 0.12f && t < 0.13f) ? 0 : min(1.0f, local * 200) * expf(-12 * local);
-    mono[i] = (int16_t)(sinf(2 * PI * (second ? 1318.5f : 880.0f) * t) * env * 12000);
+    bool high = second != cueFalling;
+    mono[i] = (int16_t)(sinf(2 * PI * (high ? 1318.5f : 880.0f) * t) * env * 12000);
   }
   playSamples(mono, 256);
   if (cueSample >= length) {

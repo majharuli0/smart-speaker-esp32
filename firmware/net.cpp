@@ -8,12 +8,15 @@
 #include "esp_wifi.h"
 #include "mbedtls/md.h"
 #include "config.h"
+#include "audiolink.h"
 
 // Topics (see docs/protocol.md):
 //   ss/dev/<id>/cmd     ← commands         ss/dev/<id>/evt     → replies and status
 //   ss/dev/<id>/audio   ← talk audio       ss/dev/<id>/online  → "1" retained, "0" last will
 //   ss/server/online    ← "1" when the server is up: say hello again
 //   ss/server/http      ← base URL for downloads
+//   ss/server/audio     ← where the audio link is (audiolink.h); while it's up,
+//                         talk and mic audio go over it instead of these topics
 
 String deviceId;
 String devicePop;
@@ -32,7 +35,7 @@ static String httpBase;
 
 // Messages arrive on the MQTT client's own task; they're queued and handled in
 // netLoop() on the main loop, so no other code ever runs on two tasks at once.
-enum Kind : uint8_t { CMD, AUDIO, SERVER_ONLINE, SERVER_HTTP, BROKER_DOWN };
+enum Kind : uint8_t { CMD, AUDIO, SERVER_ONLINE, SERVER_HTTP, SERVER_AUDIO, BROKER_DOWN };
 struct Inbox {
   Kind kind;
   size_t length;
@@ -131,6 +134,7 @@ static void onMqttEvent(void *, esp_event_base_t, int32_t id, void *data) {
       esp_mqtt_client_subscribe(mqtt, topicAudio.c_str(), 0);
       esp_mqtt_client_subscribe(mqtt, "ss/server/online", 1);
       esp_mqtt_client_subscribe(mqtt, "ss/server/http", 1);
+      esp_mqtt_client_subscribe(mqtt, "ss/server/audio", 1);
       esp_mqtt_client_publish(mqtt, topicOnline.c_str(), "1", 1, 1, 1);  // retained; "0" is the last will
       break;
     case MQTT_EVENT_DISCONNECTED:
@@ -143,6 +147,7 @@ static void onMqttEvent(void *, esp_event_base_t, int32_t id, void *data) {
       else if (topicIs(e, topicAudio)) queue(AUDIO, e->data, e->data_len);
       else if (topicIs(e, "ss/server/online")) queue(SERVER_ONLINE, e->data, e->data_len);
       else if (topicIs(e, "ss/server/http")) queue(SERVER_HTTP, e->data, e->data_len);
+      else if (topicIs(e, "ss/server/audio")) queue(SERVER_AUDIO, e->data, e->data_len);
       break;
     default:
       break;
@@ -369,6 +374,9 @@ void netLoop() {
       case SERVER_HTTP:
         httpBase = String((const char *)item.data);
         break;
+      case SERVER_AUDIO:
+        audioLinkSetUrl(String((const char *)item.data));
+        break;
       case BROKER_DOWN:
         serverUp = false;  // on reconnect the retained "1" arrives again, and we say hello again
         break;
@@ -390,8 +398,18 @@ void netSend(const char *json) {
 void netSend(const String &json) { netSend(json.c_str()); }
 
 bool netSendMic(const uint8_t *pcm, size_t length) {
+  if (audioLinkUp()) return audioLinkSendMic(pcm, length);
   return brokerUp && esp_mqtt_client_publish(mqtt, topicMic.c_str(), (const char *)pcm, length, 0, 0) >= 0;
 }
+
+String netPassword() {
+  static String password = mqttPassword();
+  return password;
+}
+
+// From the audio link's task: handled on the main loop like MQTT messages
+void netDeliverCommand(const uint8_t *json, size_t length) { queue(CMD, (const char *)json, length); }
+void netDeliverAudio(const uint8_t *pcm, size_t length) { queue(AUDIO, (const char *)pcm, length); }
 
 bool netSendNow(const char *json) {
   return brokerUp && esp_mqtt_client_publish(mqtt, topicEvt.c_str(), json, strlen(json), 0, 0) >= 0;

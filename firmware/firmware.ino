@@ -12,6 +12,7 @@
 //   mic    - the microphone, always on: sessions streamed to the server (test,
 //            voice requests, the room during a call); the rest goes to wake
 //   wake   - the wake word, matched on the speaker (wakecore: the matching itself)
+//   audiolink - live audio over its own WebSocket (MQTT carries it while that's down)
 // Messages are documented in docs/protocol.md.
 #include <ArduinoJson.h>
 #include "config.h"
@@ -27,6 +28,7 @@
 #include "led.h"
 #include "mic.h"
 #include "wake.h"
+#include "audiolink.h"
 
 static void onConnected() {
   netSend("{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\",\"fw\":\"" FW_VERSION "\",\"board\":\"" CONFIG_IDF_TARGET "\"}");
@@ -92,6 +94,7 @@ void setup() {
   alarmsSetup();
   micSetup();
   netSetup({onConnected, onCommand, onAudio});
+  audioLinkSetup();
   timeSetup();
   healthWatchdog();  // last: setup may block (formatting storage on first boot)
 }

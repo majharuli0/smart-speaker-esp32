@@ -5,6 +5,7 @@
 #include <new>
 #include "wakecore.h"
 #include "net.h"
+#include "audio.h"
 
 using wake::TAKES;
 
@@ -136,16 +137,17 @@ void wakeLoop() {
              (float)limit);
     matched = -1;
     Serial.println("Wake word heard");
+    if (netConnected()) cueStart();  // "I'm listening", at once: say the request now
     netSend(json);
   }
 }
 
-void wakeHear(int16_t sample) {
-  if (!listener || !listener->push(sample)) return;
+bool wakeHear(int16_t sample) {
+  if (!listener || !listener->push(sample)) return false;
   const wake::Word &w = listener->word();  // a word just ended
   if (mode == TAKE) {
     if (w.n > candidate->n) *candidate = w;  // the longest word said is the take
-    return;
+    return false;
   }
   bool ready = allTakes() && limit > 0;
   if (mode == TEST) {
@@ -154,15 +156,15 @@ void wakeHear(int16_t sample) {
       testScore = score;
       testFrames = w.n;
     }
-    return;
+    return false;
   }
-  if (mode != DETECT || !enabled || !ready || (long)(quietUntil - millis()) > 0) return;
+  if (mode != DETECT || !enabled || !ready || (long)(quietUntil - millis()) > 0) return false;
   float score = wake::score(w, takes, TAKES);
   if (score < limit * 1.3f) Serial.printf("Wake word? %.1f (threshold %.1f)\n", score, (float)limit);
-  if (score <= limit) {
-    matched = score;
-    quietUntil = millis() + 3000;
-  }
+  if (score > limit) return false;
+  matched = score;
+  quietUntil = millis() + 3000;
+  return true;
 }
 
 void wakeInterrupt() {

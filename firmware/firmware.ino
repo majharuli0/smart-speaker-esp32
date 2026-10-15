@@ -70,7 +70,7 @@ static void onCommand(uint8_t *payload, size_t length) {
   else if (cmd.startsWith("files_")) filesCommand(doc);
   else if (cmd == "mic_record")
     micRecord({doc["seconds"] | 5, doc["endSilence"] | 0, doc["live"] | false, doc["wakeTake"] | 0,
-               doc["wakeTest"] | false});
+               doc["wakeTest"] | false, doc["afterWake"] | false});
   else if (cmd == "mic_stop") micStop();
   else if (cmd == "wake_config") wakeConfig(doc["enabled"] | false, doc["sensitivity"] | 5);
   else if (cmd == "wake_clear") wakeClear();

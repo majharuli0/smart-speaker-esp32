@@ -48,6 +48,19 @@ static bool portStart() {
 
 static float dbfs(float v) { return v > 0 ? 20 * log10f(v / 32768) : -120; }
 
+// The last few seconds the mic heard (PSRAM), so a request said straight after
+// the wake word isn't lost while the server gets ready: sent from where the
+// word ended, when the server's mic_record says afterWake
+static const uint32_t RING = SAMPLE_RATE * 6;
+static int16_t *ring = nullptr;
+static volatile uint32_t written = 0;        // samples heard since power-on
+static volatile uint32_t wakeMark = 0;       // where the last wake word ended
+static volatile unsigned long wakeTime = 0;  // and when it was heard (0: never)
+static const uint32_t WORD_END = SAMPLE_RATE * 45 / 100;  // a word is over after 450 ms of quiet
+static const unsigned long AFTER_WAKE_MS = 4000;  // the server asks within this, or it's too old
+
+static bool wakeFresh() { return ring && wakeTime && millis() - wakeTime < AFTER_WAKE_MS; }
+
 static void micTask(void *) {
   static int32_t frames[2 * BLOCK];  // [left, right, left, right, …]
   static int16_t piece[PIECE];
@@ -58,24 +71,57 @@ static void micTask(void *) {
   bool first = true;
   uint32_t settle = SETTLE;
   uint32_t speakerQuiet = 0;          // samples since the speaker last made a sound
-  // Speech or quiet, per 50 ms window, against the room's background: the quietest
-  // recent window (it drops at once to a quieter one and rises ~2 dB a second), so
-  // someone talking from the very start isn't taken for the background. Speech is
-  // 12 dB above it; quiet is under 8 dB above it (on the prototype the background
-  // wanders 0-8 dB above its floor, and speech is 15-34 dB above).
+  // The room's background: the quietest recent 50 ms window (it drops at once to
+  // a quieter one and rises ~2 dB a second), so someone talking from the very
+  // start isn't taken for the background
   int64_t windowSum = 0;
   uint32_t windowCount = 0;
   float floor = -1;
-  // The session under way
+  // The session under way. Speech or quiet, per 50 ms window: speech is 12 dB
+  // above the background; quiet is under 8 dB above it (on the prototype the
+  // background wanders 0-8 dB above its floor, and speech is 15-34 dB above).
   MicSession s = {};
   bool on = false, capturing = false;
   uint32_t gap = 0, want = 0, total = 0, clipped = 0, pieces = 0, dropped = 0, loudRun = 0, quietMs = 0;
   size_t fill = 0;
   bool heard = false, silenceEnded = false;
-  int64_t levelSum = 0;
+  int64_t sessionSum = 0, levelSum = 0;
+  uint32_t sessionCount = 0, levelCount = 0;
   int32_t levelPeak = 0;
-  uint32_t levelCount = 0;
   char json[360];
+
+  // One sample of the session: sent, and judged speech or quiet
+  auto capture = [&](int16_t y, bool over) {
+    total++;
+    if (over) clipped++;
+    piece[fill++] = y;
+    if (fill == PIECE) {
+      if (netSendMic((const uint8_t *)piece, sizeof(piece))) pieces++;
+      else dropped++;  // not connected: lost, never piled up
+      fill = 0;
+    }
+    sessionSum += (int64_t)y * y;
+    if (++sessionCount == WINDOW) {
+      float power = (float)sessionSum / WINDOW;
+      sessionSum = sessionCount = 0;
+      bool loud = power > floor * 16 && power > 1100;  // +12 dB, and above -60 dB
+      loudRun = loud ? loudRun + 1 : 0;
+      if (loudRun >= 2) heard = true;  // 100 ms of it: someone is speaking
+      if (power < floor * 6.3f) {      // under +8 dB
+        if (heard) quietMs += 50;
+      } else quietMs = 0;
+      if (s.endSilenceMs && heard && quietMs >= (uint32_t)s.endSilenceMs) silenceEnded = true;
+    }
+    if (s.live) return;
+    levelSum += (int64_t)y * y;
+    levelPeak = max(levelPeak, abs((int32_t)y));
+    if (++levelCount == SAMPLE_RATE / 4) {  // the live level meter, 4 times a second
+      float rms = dbfs(sqrtf((float)levelSum / levelCount)), peak = dbfs(levelPeak);
+      snprintf(json, sizeof(json), "{\"type\":\"mic_level\",\"rms\":%.1f,\"peak\":%.1f}", rms, peak);
+      netSendNow(json);
+      levelSum = levelPeak = levelCount = 0;
+    }
+  };
 
   for (;;) {
     if (askedNew) {  // a new session
@@ -88,8 +134,15 @@ static void micTask(void *) {
       total = clipped = pieces = dropped = loudRun = quietMs = 0;
       fill = 0;
       heard = silenceEnded = false;
-      levelSum = levelPeak = levelCount = 0;
+      sessionSum = levelSum = levelPeak = sessionCount = levelCount = 0;
       wakeSessionStart(s.wakeTake, s.wakeTest);
+      // Straight after the wake word: from where it ended, at once
+      if (s.afterWake && wakeFresh()) {
+        capturing = true;
+        uint32_t from = written - wakeMark > RING ? written - RING : wakeMark;
+        for (uint32_t i = from; i != written && !silenceEnded && total < want; i++) capture(ring[i % RING], false);
+        wakeTime = 0;
+      }
     }
 
     size_t got = 0;
@@ -125,47 +178,27 @@ static void micTask(void *) {
       if (settle) { settle--; continue; }
       bool over = y > 32767 || y < -32768;
       y = constrain(y, -32768, 32767);
+      if (ring) ring[written % RING] = (int16_t)y;
+      written = written + 1;
       bool echoFree = speakerQuiet >= ECHO;
       if (speakerQuiet < ECHO) speakerQuiet++;
-      if (echoFree) wakeHear((int16_t)y);
+      if (echoFree && wakeHear((int16_t)y)) {  // the wake word: it ended a moment ago
+        wakeMark = written > WORD_END ? written - WORD_END : 0;
+        wakeTime = millis() | 1;
+      }
 
       windowSum += (int64_t)y * y;
-      bool windowDone = ++windowCount == WINDOW;
-      float power = 0;
-      if (windowDone) {
-        power = (float)windowSum / WINDOW;
+      if (++windowCount == WINDOW) {
+        float power = (float)windowSum / WINDOW;
         windowSum = windowCount = 0;
         floor = floor < 0 || power < floor ? power : floor * 1.023f;
       }
-      if (!on || !capturing || silenceEnded) continue;
-
-      total++;
-      if (s.live && !echoFree) continue;  // the caller's voice is playing: send nothing
-      if (over) clipped++;
-      piece[fill++] = (int16_t)y;
-      if (fill == PIECE) {
-        if (netSendMic((const uint8_t *)piece, sizeof(piece))) pieces++;
-        else dropped++;  // not connected: lost, never piled up
-        fill = 0;
+      if (!on || !capturing || silenceEnded || total >= want) continue;
+      if (s.live && !echoFree) {  // the caller's voice is playing: send nothing
+        total++;
+        continue;
       }
-      if (windowDone) {
-        bool loud = power > floor * 16 && power > 1100;  // +12 dB, and above -60 dB
-        loudRun = loud ? loudRun + 1 : 0;
-        if (loudRun >= 2) heard = true;  // 100 ms of it: someone is speaking
-        if (power < floor * 6.3f) {      // under +8 dB
-          if (heard) quietMs += 50;
-        } else quietMs = 0;
-        if (s.endSilenceMs && heard && quietMs >= (uint32_t)s.endSilenceMs) silenceEnded = true;
-      }
-      if (s.live) continue;
-      levelSum += (int64_t)y * y;
-      levelPeak = max(levelPeak, abs(y));
-      if (++levelCount == SAMPLE_RATE / 4) {  // the live level meter, 4 times a second
-        float rms = dbfs(sqrtf((float)levelSum / levelCount)), peak = dbfs(levelPeak);
-        snprintf(json, sizeof(json), "{\"type\":\"mic_level\",\"rms\":%.1f,\"peak\":%.1f}", rms, peak);
-        netSendNow(json);
-        levelSum = levelPeak = levelCount = 0;
-      }
+      capture((int16_t)y, over);
     }
 
     if (on && (stopAsked || silenceEnded || total >= want)) {
@@ -192,6 +225,7 @@ static void micTask(void *) {
 }
 
 void micSetup() {
+  ring = (int16_t *)heap_caps_malloc(RING * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   portOk = portStart();
   if (!portOk) {
     Serial.println("Microphone: its I2S port didn't start");
@@ -212,8 +246,10 @@ bool micRecord(const MicSession &s) {
   asked.endSilenceMs = s.live ? 0 : constrain(s.endSilenceMs, 0, 5000);
   toneStop();               // a quiet room: nothing plays while it listens…
   if (!s.live) talkStop();  // …except, in a call, the caller
-  // "I'm listening", or for a call "the room can be heard now"
-  if (asked.endSilenceMs || s.live) cueStart();
+  // "I'm listening", or for a call "the room can be heard now" (after the wake
+  // word it beeped already, and sends what was said since)
+  asked.afterWake = s.afterWake && wakeFresh();
+  if ((asked.endSilenceMs || s.live) && !asked.afterWake) cueStart();
   stopAsked = false;
   running = true;
   askedNew = true;

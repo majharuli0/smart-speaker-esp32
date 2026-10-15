@@ -13,6 +13,7 @@ struct MicSession {
   bool live;         // the room for a call: the speaker keeps talking; nothing is sent while it does
   int wakeTake;      // 1-3: this recording is that take of the wake word
   bool wakeTest;     // this recording is scored against the takes
+  bool afterWake;    // the request after the wake word: from where the word ended (the speaker beeped already)
 };
 
 void micSetup();                      // after audioSetup and wakeSetup

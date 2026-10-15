@@ -1,7 +1,8 @@
 // Wake word: the person's own recordings of it (3 takes, made on this speaker
 // through the mic), matched here on the speaker against what the mic hears
 // (wakecore). Nothing the mic hears leaves the speaker for this: on a match it
-// only reports "wake", and the server starts a voice request. The takes are kept
+// beeps, reports "wake", and the server starts a voice request (the mic sends
+// what was said since the word: see mic.cpp). The takes are kept
 // in the built-in storage; on/off and sensitivity come from the server.
 #pragma once
 #include <stddef.h>
@@ -14,7 +15,7 @@ void wakeClear();   // forget the takes
 void wakeReport();  // wake_status to the server
 
 // From the mic task
-void wakeHear(int16_t sample);  // the room, while the speaker makes no sound
+bool wakeHear(int16_t sample);  // the room, while the speaker makes no sound; true: the wake word
 void wakeInterrupt();           // the speaker is making a sound
 // A mic session starts: take 1-3 records that take, test scores against the takes,
 // neither ignores what's said (a voice request, a call)

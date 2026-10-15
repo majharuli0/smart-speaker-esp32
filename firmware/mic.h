@@ -19,6 +19,8 @@ struct MicSession {
   bool afterWake;    // after the wake word: from where the word started
   bool conversation; // a conversation: turns, with the AI's voice in between (endSilenceMs ends a turn)
   int idleMs;        // a conversation ends when the person says nothing this long on their turn
+  bool echoTest;     // plays a sweep while recording; mic_done tells where both started (rx/tx sample numbers)
+  bool aec;          // the recording goes through echo cancellation (ESP-SR) first (being measured)
 };
 
 enum MicState { MIC_OFF, MIC_LISTENING, MIC_THINKING };

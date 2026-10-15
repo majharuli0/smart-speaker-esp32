@@ -40,3 +40,13 @@ bool isChiming();
 bool isCueing();
 String ringingToneName();
 bool audioBusy();   // a tone or talk is playing (don't start slow work like mounting a card)
+
+// What the loudspeaker played, numbered (silence too): for echo cancellation.
+// txIndex counts every sample sent to the amp; the reference keeps the last ~2 s.
+uint32_t audioTxIndex();
+void audioReference(uint32_t from, int16_t *out, size_t n);
+
+// The echo test: a 2 s sweep (150 Hz - 7 kHz); once it has started playing, its
+// first sample's tx index
+void sweepStart();
+bool sweepTxIndex(uint32_t *tx);

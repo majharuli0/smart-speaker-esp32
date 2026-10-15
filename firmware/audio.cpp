@@ -32,6 +32,25 @@ static bool music = false;    // played from the file manager: no time limit, re
 static bool repeatOn = true;  // music starts again at the end (saved setting)
 static int readRetries = 0;   // reopening a file after a failed read
 
+// ---- Output ----
+// Everything played goes into playRing (mono, volume applied); the output task
+// moves it to the amp in 16 ms blocks, with silence when there's nothing, so
+// the amp never runs dry and the delay from here to the loudspeaker stays the
+// same. Each block played is also kept in refRing, numbered (txIndex): what the
+// mic hears back from the loudspeaker, for echo cancellation.
+static const size_t PLAY_RING = 2048;    // 128 ms waiting to play
+static const uint32_t REF_RING = 32768;  // the last ~2 s played
+static const size_t BLOCK = 256;         // 16 ms
+static int16_t *playRing = nullptr;
+static volatile size_t playHead = 0, playCount = 0;
+static portMUX_TYPE playMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile uint32_t pushed = 0;     // samples ever put in playRing
+static int16_t *refRing = nullptr;
+static volatile uint32_t txIndex = 0;    // samples ever sent to the amp (silence too)
+// The echo test's sweep: which pushed sample it starts at, and so which tx index
+static volatile uint32_t sweepPush = 0, sweepTx = 0;
+static volatile bool sweepPushed = false, sweepPlayed = false;
+
 static int16_t talkBuf[TALK_BUF_SAMPLES];
 static size_t talkHead = 0, talkCount = 0;  // read position, samples buffered
 static bool talking = false, talkPlaying = false, talkEnding = false;
@@ -78,7 +97,7 @@ static void i2sSetup() {
     .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 8,
+    .dma_buf_count = 4,  // 64 ms; the output task keeps it full
     .dma_buf_len = 256,
     .use_apll = false,
     .tx_desc_auto_clear = true
@@ -94,23 +113,106 @@ static void i2sSetup() {
   i2s_zero_dma_buffer(I2S_PORT);
 }
 
-// Mono samples → both channels, volume applied, into the I2S queue
-// (blocks only while the queue is full, i.e. at playback speed)
+// Mono samples, volume applied, into playRing (blocks only while it's full,
+// i.e. at playback speed, as writing to the amp did)
 static void playSamples(const int16_t *mono, size_t n) {
-  int16_t stereo[512];
   // Fading alarm: 10% of the set volume at first, full after FADE_IN_MS
   int32_t fade = 256;
   if (fading && ringing) {
     unsigned long t = millis() - ringStart;
     fade = t >= FADE_IN_MS ? 256 : 26 + (int32_t)(230 * t / FADE_IN_MS);
   }
-  for (size_t i = 0; i < n; i++) stereo[2 * i] = stereo[2 * i + 1] = (int32_t)applyVolume(mono[i]) * fade >> 8;
-  size_t written;
-  i2s_write(I2S_PORT, stereo, n * 4, &written, portMAX_DELAY);
+  for (size_t i = 0; i < n; i++) {
+    while (playCount >= PLAY_RING) vTaskDelay(1);  // full: wait for the output task
+    int16_t v = (int32_t)applyVolume(mono[i]) * fade >> 8;
+    taskENTER_CRITICAL(&playMux);
+    playRing[(playHead + playCount) % PLAY_RING] = v;
+    playCount = playCount + 1;
+    pushed = pushed + 1;
+    taskEXIT_CRITICAL(&playMux);
+  }
+}
+
+// Stop at once: what's waiting is dropped (the amp still plays its last 64 ms)
+static void playFlush() {
+  taskENTER_CRITICAL(&playMux);
+  playHead = (playHead + playCount) % PLAY_RING;
+  playCount = 0;
+  taskEXIT_CRITICAL(&playMux);
+}
+
+static void outputTask(void *) {
+  static int16_t mono[BLOCK];
+  static int16_t stereo[BLOCK * 2];
+  for (;;) {
+    taskENTER_CRITICAL(&playMux);
+    size_t n = playCount < BLOCK ? playCount : BLOCK;
+    uint32_t first = pushed - playCount;  // the pushed number of the first one taken
+    for (size_t i = 0; i < n; i++) mono[i] = playRing[(playHead + i) % PLAY_RING];
+    playHead = (playHead + n) % PLAY_RING;
+    playCount = playCount - n;
+    taskEXIT_CRITICAL(&playMux);
+    for (size_t i = n; i < BLOCK; i++) mono[i] = 0;  // nothing to play: silence
+    if (sweepPushed && !sweepPlayed && sweepPush - first < n) {
+      sweepTx = txIndex + (sweepPush - first);
+      sweepPlayed = true;
+    }
+    for (size_t i = 0; i < BLOCK; i++) {
+      stereo[2 * i] = stereo[2 * i + 1] = mono[i];
+      refRing[(txIndex + i) % REF_RING] = mono[i];
+    }
+    size_t written;
+    i2s_write(I2S_PORT, stereo, sizeof(stereo), &written, portMAX_DELAY);
+    txIndex = txIndex + BLOCK;
+  }
+}
+
+uint32_t audioTxIndex() { return txIndex; }
+
+void audioReference(uint32_t from, int16_t *out, size_t n) {
+  for (size_t i = 0; i < n; i++) out[i] = refRing[(from + i) % REF_RING];
+}
+
+// ---- The echo test: a 2 s sweep, 150 Hz to 7 kHz ----
+static bool sweeping = false;
+static uint32_t sweepSample = 0;
+static const uint32_t SWEEP_SAMPLES = SAMPLE_RATE * 2;
+
+void sweepStart() {
+  taskENTER_CRITICAL(&playMux);
+  sweepPush = pushed;  // the next sample pushed is the sweep's first
+  sweepPushed = true;
+  sweepPlayed = false;
+  taskEXIT_CRITICAL(&playMux);
+  sweepSample = 0;
+  sweeping = true;
+}
+
+bool sweepTxIndex(uint32_t *tx) {
+  if (!sweepPlayed) return false;
+  *tx = sweepTx;
+  return true;
+}
+
+static void pumpSweep() {
+  if (!sweeping) return;
+  int16_t mono[BLOCK];
+  const float f0 = 150, f1 = 7000, T = (float)SWEEP_SAMPLES / SAMPLE_RATE, k = logf(f1 / f0);
+  for (size_t i = 0; i < BLOCK; i++, sweepSample++) {
+    float t = (float)sweepSample / SAMPLE_RATE;
+    float phase = 2 * PI * f0 * T / k * (expf(t * k / T) - 1);  // exponential sweep
+    mono[i] = sweepSample < SWEEP_SAMPLES ? (int16_t)(sinf(phase) * 16000) : 0;
+  }
+  playSamples(mono, BLOCK);
+  if (sweepSample >= SWEEP_SAMPLES) sweeping = false;
 }
 
 void audioSetup() {
   i2sSetup();
+  playRing = (int16_t *)heap_caps_malloc(PLAY_RING * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  refRing = (int16_t *)heap_caps_malloc(REF_RING * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  // Core 1, above the mic task: the amp must never wait
+  xTaskCreatePinnedToCore(outputTask, "audio out", 4096, nullptr, 5, nullptr, 1);
   prefs.begin("audio");
   applyVolumeSetting(prefs.getUChar("vol", DEFAULT_VOLUME));
   repeatOn = prefs.getBool("repeat", true);
@@ -174,7 +276,7 @@ void toneStop() {
   if (toneFile) toneFile.close();
   fromFile = false;
   ringingTone = "";
-  i2s_zero_dma_buffer(I2S_PORT);
+  playFlush();
   Serial.println("Ringing stopped");
   netSend("{\"type\":\"stopped\"}");
 }
@@ -251,14 +353,18 @@ static void pumpTone() {
 
 // ---- Live talk ----
 
-void talkStop() {
+// cut: stop at once (stop, an alarm); otherwise (all played) the last words
+// already waiting for the amp still play
+static void talkEnd(bool cut) {
   if (!talking) return;
   talking = false;
   talkCount = 0;
-  i2s_zero_dma_buffer(I2S_PORT);
+  if (cut) playFlush();
   Serial.println("Talk stopped");
   netSend("{\"type\":\"talk_stopped\"}");
 }
+
+void talkStop() { talkEnd(true); }
 
 void talkStart() {
   chiming = false;
@@ -293,7 +399,7 @@ static void pumpTalk() {
     talkPlaying = true;
   }
   if (talkCount == 0) {
-    if (talkEnding) talkStop();                                              // played out the last words
+    if (talkEnding) talkEnd(false);                                              // played out the last words
     else if (millis() - talkLastPlayed > TALK_DRY_MS) talkPlaying = false;  // starved: buffer up again
     return;
   }
@@ -336,8 +442,7 @@ static void pumpChime() {
   }
   playSamples(mono, 256);
   if (chimeSample >= length) {
-    chiming = false;
-    i2s_zero_dma_buffer(I2S_PORT);
+    chiming = false;  // its last notes still play out
   }
 }
 
@@ -366,8 +471,7 @@ static void pumpCue() {
   }
   playSamples(mono, 256);
   if (cueSample >= length) {
-    cueing = false;
-    i2s_zero_dma_buffer(I2S_PORT);
+    cueing = false;  // its last notes still play out
   }
 }
 
@@ -376,6 +480,7 @@ void audioLoop() {
   pumpTalk();
   pumpChime();
   pumpCue();
+  pumpSweep();
 }
 
 bool audioBusy() { return ringing || talking || chiming || cueing; }

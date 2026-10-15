@@ -5,6 +5,8 @@
 #include "audio.h"
 #include "wake.h"
 #include "wakecore.h"
+#include "esp_aec.h"
+#include "esp_timer.h"
 
 static const size_t PIECE = SAMPLE_RATE * 12 / 100;  // 120 ms a message (6 Opus frames of 20 ms on the audio link)
 static const size_t BLOCK = 256;              // frames per I2S read (16 ms)
@@ -70,6 +72,54 @@ static const uint32_t WORD_END = SAMPLE_RATE * 45 / 100;  // a word is over afte
 static const uint32_t BEFORE_WORD = SAMPLE_RATE * 15 / 100;  // and a little before it, to be safe
 static const unsigned long AFTER_WAKE_MS = 4000;  // the server asks within this, or it's too old
 
+// Echo cancellation (ESP-SR): the mic minus what the amp played, lined up by
+// the two sample counters (see AEC_DELAY_CAL). Made once, at startup.
+static aec_handle_t *aec = nullptr;
+static int aecChunk = 0;
+static int16_t *aecIn = nullptr, *aecRef = nullptr, *aecOut = nullptr;
+// (rx - tx) right after each mic read. The two ports' clocks keep it the same
+// while this task keeps up; when the task is late (busy, or the startup rush)
+// it reads old samples and the value comes out lower. So the steady one is the
+// highest over the last second, not the lowest since boot (that one moved by
+// ~60 ms from boot to boot).
+static volatile int32_t snapSteady = INT32_MIN;  // the highest in the last whole second
+static int32_t snapWindow = INT32_MIN;           // the highest so far in this second
+static int snapReads = 0;
+static const int SNAP_READS = SAMPLE_RATE / BLOCK;  // a second of reads
+static const int32_t AEC_MARGIN = 384;  // the reference leads the echo by 24 ms (the filter needs it ahead; ±16 ms slack)
+
+static bool aecReady() {
+  if (aec) return true;
+  Serial.printf("Echo cancellation: starting (free: %u internal, %u PSRAM; stack left %u)\n",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                (unsigned)uxTaskGetStackHighWaterMark(nullptr));
+  aec_config_t cfg = {};
+  cfg.mic_num = 1;
+  cfg.ref_num = 1;
+  cfg.out_num = 1;
+  cfg.filter_length = 4;
+  cfg.sample_rate = SAMPLE_RATE;
+  // PSRAM: in internal RAM it takes ~124 KB, and Wi-Fi then can't start
+  // (and the library crashes, rather than failing, when internal RAM runs out)
+  size_t internalBefore = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  size_t psramBefore = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  const bool inside = false;
+  cfg.caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+  cfg.mode = AEC_MODE_FD_LOW_COST;  // measured: removes as much as FD_HIGH_PERF here, 10.1 ms a 32 ms chunk (vs 13.6)
+  cfg.nlp_level = AEC_NLP_LEVEL_AGGR;
+  aec = aec_create_from_config(&cfg);
+  if (!aec) return false;
+  aecChunk = aec_get_chunksize(aec);
+  Serial.printf("Echo cancellation in %s RAM: it took %u internal + %u PSRAM bytes\n", inside ? "internal" : "PSRAM",
+                (unsigned)(internalBefore - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                (unsigned)(psramBefore - heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
+  aecIn = (int16_t *)heap_caps_aligned_alloc(16, aecChunk * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  aecRef = (int16_t *)heap_caps_aligned_alloc(16, aecChunk * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  aecOut = (int16_t *)heap_caps_aligned_alloc(16, aecChunk * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  Serial.printf("Echo cancellation ready: %d-sample chunks\n", aecChunk);
+  return aecIn && aecRef && aecOut;
+}
+
 static bool wakeFresh() { return ring && bandRing && wakeTime && millis() - wakeTime < AFTER_WAKE_MS; }
 
 static void micTask(void *) {
@@ -100,6 +150,13 @@ static void micTask(void *) {
   int64_t levelSum = 0;
   uint32_t sessionCount = 0, levelCount = 0;
   int32_t levelPeak = 0;
+  uint32_t rxStart = 0;  // the first captured sample's number (rx index)
+  wake::SpeechBand aecBand;       // the speech band of the cancelled audio
+  int aecFill = 0;                // mic samples waiting for a whole chunk
+  uint32_t aecRx0 = 0;            // the first one's rx index
+  uint64_t aecUs = 0;             // time spent cancelling, and in how many chunks
+  uint32_t aecChunks = 0;
+  bool aecOn = false;
   uint32_t turnMs = 0;  // in this turn (waiting, speaking or thinking)
   bool idleEnded = false;
   char json[360];
@@ -118,6 +175,7 @@ static void micTask(void *) {
 
   // One sample of the session (and its speech-band value): sent, and judged speech or quiet
   auto capture = [&](int16_t y, float banded, bool over) {
+    if (!total) rxStart = written - 1;
     total++;
     if (over) clipped++;
     piece[fill++] = y;
@@ -185,6 +243,9 @@ static void micTask(void *) {
       turnMs = 0;
       idleEnded = false;
       wakeSessionStart(s.wakeTake, s.wakeTest);
+      aecOn = s.aec && snapSteady != INT32_MIN && aecReady();
+      aecFill = 0;
+      aecUs = aecChunks = 0;
       // Straight after the wake word: from where it ended, at once
       if (s.afterWake && wakeFresh()) {
         capturing = true;
@@ -198,6 +259,15 @@ static void micTask(void *) {
     size_t got = 0;
     if (i2s_read(MIC_PORT, frames, sizeof(frames), &got, pdMS_TO_TICKS(100)) != ESP_OK || !got) continue;
     size_t n = got / 8;
+    {
+      int32_t snap = (int32_t)(written - audioTxIndex());
+      if (snap > snapWindow) snapWindow = snap;
+      if (++snapReads >= SNAP_READS) {
+        snapSteady = snapWindow;
+        snapWindow = INT32_MIN;
+        snapReads = 0;
+      }
+    }
     if (sampled < SAMPLE_RATE) {
       for (size_t i = 0; i < n; i++) {
         energyL += abs(frames[2 * i] >> 8);
@@ -264,7 +334,23 @@ static void micTask(void *) {
         total++;
         continue;
       }
-      capture((int16_t)y, banded, over);
+      if (!aecOn) {
+        capture((int16_t)y, banded, over);
+        continue;
+      }
+      // Echo cancellation: whole chunks of mic audio, each with what the amp played
+      if (!aecFill) aecRx0 = written - 1;
+      aecIn[aecFill++] = (int16_t)y;
+      if (aecFill == aecChunk) {
+        aecFill = 0;
+        uint32_t tx = aecRx0 - (uint32_t)(snapSteady + AEC_DELAY_CAL) + AEC_MARGIN;
+        audioReference(tx, aecRef, aecChunk);
+        int64_t t0 = esp_timer_get_time();
+        aec_process(aec, aecIn, aecRef, aecOut);
+        aecUs += esp_timer_get_time() - t0;
+        aecChunks++;
+        for (int k = 0; k < aecChunk; k++) capture(aecOut[k], aecBand.push(aecOut[k]), false);
+      }
     }
 
     if (on && (stopAsked || silenceEnded || idleEnded || total >= want)) {
@@ -280,6 +366,13 @@ static void micTask(void *) {
                          right ? "right" : "left", MIC_GAIN_SHIFT, heard ? "true" : "false", endedBy,
                          floor > 0 ? 10 * log10f(floor / (32768.0f * 32768.0f)) : -120.0f);
       len += wakeSessionEnd(json + len, sizeof(json) - len - 2);  // a wake word take or test: its result
+      uint32_t tx;
+      if (s.echoTest && sweepTxIndex(&tx))
+        len += snprintf(json + len, sizeof(json) - len - 2,
+                        ",\"echo\":{\"rxStart\":%lu,\"sweepTx\":%lu,\"snap\":%ld,\"aec\":%s,\"aecChunk\":%d,"
+                        "\"aecUsPerChunk\":%lu}",
+                        (unsigned long)rxStart, (unsigned long)tx, (long)snapSteady, aecOn ? "true" : "false", aecChunk,
+                        (unsigned long)(aecChunks ? aecUs / aecChunks : 0));
       snprintf(json + len, sizeof(json) - len, "}");
       netSend(json);
       Serial.printf("Microphone session over (%s): %lu samples, %lu clipped\n", endedBy, (unsigned long)total,
@@ -293,6 +386,7 @@ static void micTask(void *) {
 }
 
 void micSetup() {
+  aecReady();  // now, not on first use: making it takes ~2 s (the mic would lose that much)
   ring = (int16_t *)heap_caps_malloc(RING * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   bandRing = (float *)heap_caps_malloc(RING * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!bandRing) ring = nullptr;  // both or neither
@@ -302,7 +396,7 @@ void micSetup() {
     return;
   }
   // Its own task, so a busy main loop doesn't lose audio; core 1, like the loop (Wi-Fi is on core 0)
-  xTaskCreatePinnedToCore(micTask, "mic", 8192, nullptr, 3, nullptr, 1);
+  xTaskCreatePinnedToCore(micTask, "mic", 12288, nullptr, 3, nullptr, 1);  // echo cancellation runs here too
 }
 
 bool micRecord(const MicSession &s) {
@@ -321,6 +415,7 @@ bool micRecord(const MicSession &s) {
   // the wake word: it sends from the word on, and the server answers if it was)
   asked.afterWake = s.afterWake && wakeFresh();
   if ((asked.endSilenceMs || s.live) && !asked.afterWake) cueStart();
+  if (s.echoTest) sweepStart();  // plays while it records
   stopAsked = false;
   stopQuiet = false;
   running = true;

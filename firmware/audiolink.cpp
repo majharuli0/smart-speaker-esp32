@@ -5,6 +5,7 @@
 #include "esp_transport_tcp.h"
 #include "esp_transport_ws.h"
 #include "freertos/ringbuf.h"
+#include "freertos/idf_additions.h"
 #include "net.h"
 #include "opus.h"
 
@@ -252,6 +253,7 @@ static void linkTask(void *) {
 void audioLinkSetup() {
   urlLock = xSemaphoreCreateMutex();
   outbox = xRingbufferCreateWithCaps(OUTBOX_BYTES, RINGBUF_TYPE_NOSPLIT, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  // Core 0, with Wi-Fi; a TLS handshake and Opus (which works on the stack) need a deep one
-  xTaskCreatePinnedToCore(linkTask, "audiolink", 32768, nullptr, 2, nullptr, 0);
+  // Core 0, with Wi-Fi; a TLS handshake and Opus (which works on the stack) need
+  // a deep one: in PSRAM, as fast internal RAM is scarce (it never touches flash)
+  xTaskCreatePinnedToCoreWithCaps(linkTask, "audiolink", 32768, nullptr, 2, nullptr, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }

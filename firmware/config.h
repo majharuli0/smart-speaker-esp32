@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.28.0"
+#define FW_VERSION "0.29.0"
 
 // ---- Broker address and device secret: in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -79,6 +79,10 @@
 #define MIC_GAIN_SHIFT 8
 #define MIC_TEST_MAX_S 20     // a test recording is at most this long
 #define MIC_LIVE_MAX_S 600    // a call's room audio: at most 10 minutes at a time
+// Echo cancellation: the mic hears what the amp played D samples later (rx - tx
+// counters). D = the lowest (rx - tx) seen since boot + this calibration, measured
+// with the echo test on this hardware (the amp's and the mic's buffering).
+#define AEC_DELAY_CAL 1318  // measured 2026-10-16 over two boots (1325, 1311): the amp's 64 ms queue + the mic's buffering
 
 // Live voice from the browser (same 16 kHz mono format as tones). It arrives in
 // 125 ms pieces (the cloud broker allows the server only 10 messages a second).

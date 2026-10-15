@@ -6,7 +6,7 @@
 #include "wake.h"
 #include "wakecore.h"
 
-static const size_t PIECE = SAMPLE_RATE / 8;  // 125 ms per MQTT message: 8 a second
+static const size_t PIECE = SAMPLE_RATE * 12 / 100;  // 120 ms a message (6 Opus frames of 20 ms on the audio link)
 static const size_t BLOCK = 256;              // frames per I2S read (16 ms)
 
 static const uint32_t WINDOW = SAMPLE_RATE / 20;     // 50 ms: the step for telling speech from quiet

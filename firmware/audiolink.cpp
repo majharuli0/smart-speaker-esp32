@@ -6,8 +6,53 @@
 #include "esp_transport_ws.h"
 #include "freertos/ringbuf.h"
 #include "net.h"
+#include "opus.h"
 
-static const uint8_t MIC_PCM = 0x03, TALK_PCM = 0x04;
+static const uint8_t MIC_OPUS = 0x01, TALK_OPUS = 0x02, MIC_PCM = 0x03, TALK_PCM = 0x04;
+static const int OPUS_FRAME = 320;     // samples: 20 ms
+static const int OPUS_BITRATE = 24000;
+static const int OPUS_COMPLEXITY = 2;  // 0-10: low keeps the CPU free for the rest
+static const int MAX_FRAMES = 16;      // in one message (talk comes in up to 125 ms)
+
+// Opus, used only on the link task (it needs a deep stack)
+static OpusEncoder *encoder = nullptr;
+static OpusDecoder *decoder = nullptr;
+
+// A mic piece (PCM) → [MIC_OPUS][seq][frames…]; a short last piece is padded with silence
+static size_t encodeMic(const uint8_t *item, size_t size, uint8_t *out, size_t room) {
+  const int16_t *pcm = (const int16_t *)(item + 3);
+  int samples = (size - 3) / 2;
+  out[0] = MIC_OPUS;
+  out[1] = item[1];
+  out[2] = item[2];
+  size_t n = 3;
+  int16_t frame[OPUS_FRAME];
+  for (int at = 0; at < samples && n + 2 + 200 <= room; at += OPUS_FRAME) {
+    int take = min(OPUS_FRAME, samples - at);
+    memcpy(frame, pcm + at, take * 2);
+    if (take < OPUS_FRAME) memset(frame + take, 0, (OPUS_FRAME - take) * 2);
+    int bytes = opus_encode(encoder, frame, OPUS_FRAME, out + n + 2, room - n - 2);
+    if (bytes <= 0) break;
+    out[n] = bytes >> 8;
+    out[n + 1] = bytes & 255;
+    n += 2 + bytes;
+  }
+  return n;
+}
+
+// [frames…] from the server → PCM for the speaker, handed to the main loop
+static void decodeTalk(const uint8_t *in, int length) {
+  static int16_t pcm[OPUS_FRAME * MAX_FRAMES];
+  int samples = 0;
+  for (int at = 0; at + 2 <= length && samples + OPUS_FRAME <= OPUS_FRAME * MAX_FRAMES;) {
+    int bytes = (in[at] << 8) | in[at + 1];
+    if (at + 2 + bytes > length) break;
+    int got = opus_decode(decoder, in + at + 2, bytes, pcm + samples, OPUS_FRAME, 0);
+    if (got > 0) samples += got;
+    at += 2 + bytes;
+  }
+  if (samples) netDeliverAudio((const uint8_t *)pcm, samples * 2);
+}
 static const size_t OUTBOX_BYTES = 32 * 1024;  // ~1 s of mic audio waiting to go
 static const unsigned long KEEPALIVE_MS = 15000;
 
@@ -95,6 +140,19 @@ static bool sendText(esp_transport_handle_t ws, const String &text) {
 }
 
 static void linkTask(void *) {
+  int err;
+  encoder = opus_encoder_create(16000, 1, OPUS_APPLICATION_VOIP, &err);
+  if (encoder) {
+    opus_encoder_ctl(encoder, OPUS_SET_BITRATE(OPUS_BITRATE));
+    opus_encoder_ctl(encoder, OPUS_SET_COMPLEXITY(OPUS_COMPLEXITY));
+    opus_encoder_ctl(encoder, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE));
+  }
+  decoder = opus_decoder_create(16000, 1, &err);
+  if (!encoder || !decoder) {  // no memory: raw PCM still works
+    Serial.println("Audio link: Opus didn't start, sending raw audio");
+    encoder = nullptr;
+    decoder = nullptr;
+  }
   static uint8_t rx[8192];  // a frame: 125 ms of talk audio (4,000 bytes) + its header, with room to spare
   for (;;) {
     if (!netConnected()) {
@@ -120,7 +178,8 @@ static void linkTask(void *) {
     ws_transport_opcodes_t op;
     bool ok = esp_transport_connect(ws, host.c_str(), port, 5000) >= 0;
     if (ok) {  // log in like on MQTT: the device ID and its password
-      String hello = "{\"type\":\"hello\",\"id\":\"" + deviceId + "\",\"password\":\"" + netPassword() + "\"}";
+      String hello = "{\"type\":\"hello\",\"id\":\"" + deviceId + "\",\"password\":\"" + netPassword() + "\"" +
+                     (encoder ? ",\"codec\":\"opus\"}" : "}");
       ok = sendText(ws, hello);
     }
     if (ok) {
@@ -135,13 +194,22 @@ static void linkTask(void *) {
       up = true;
       Serial.println("Audio link up: " + u);
     }
-    unsigned long lastSent = millis();
+    unsigned long lastSent = millis(), lastReport = millis();
+    size_t sentBytes = 0;
     const char *why = "the server went away";
     while (ok && netConnected() && !urlChanged) {
       size_t size;
       void *item;
       while (ok && (item = xRingbufferReceive(outbox, &size, 0)) != nullptr) {  // mic audio out
-        ok = sendFrame(ws, true, item, size);
+        if (encoder && ((uint8_t *)item)[0] == MIC_PCM) {
+          static uint8_t packed[2048];
+          size_t n = encodeMic((const uint8_t *)item, size, packed, sizeof(packed));
+          ok = sendFrame(ws, true, packed, n);
+          sentBytes += n;
+        } else {
+          ok = sendFrame(ws, true, item, size);
+          sentBytes += size;
+        }
         vRingbufferReturnItem(outbox, item);
         lastSent = millis();
         if (!ok) why = "sending mic audio failed";
@@ -154,6 +222,13 @@ static void linkTask(void *) {
       }
       if (r > 0 && op == WS_TRANSPORT_OPCODES_TEXT) netDeliverCommand(rx, r);
       else if (r > 3 && op == WS_TRANSPORT_OPCODES_BINARY && rx[0] == TALK_PCM) netDeliverAudio(rx + 3, r - 3);
+      else if (r > 3 && op == WS_TRANSPORT_OPCODES_BINARY && rx[0] == TALK_OPUS && decoder) decodeTalk(rx + 3, r - 3);
+      if (millis() - lastReport > 60000) {  // how much it sends, and how deep Opus goes into the stack
+        Serial.printf("Audio link: %u bytes of mic audio in the last minute; stack left %u\n", (unsigned)sentBytes,
+                      (unsigned)uxTaskGetStackHighWaterMark(nullptr));
+        sentBytes = 0;
+        lastReport = millis();
+      }
       if (millis() - lastSent > KEEPALIVE_MS) {  // keeps NAT and proxies from closing it
         ok = sendText(ws, "{\"type\":\"ping\"}");
         if (!ok) why = "the keep-alive failed";
@@ -177,6 +252,6 @@ static void linkTask(void *) {
 void audioLinkSetup() {
   urlLock = xSemaphoreCreateMutex();
   outbox = xRingbufferCreateWithCaps(OUTBOX_BYTES, RINGBUF_TYPE_NOSPLIT, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  // Core 0, with Wi-Fi; a TLS handshake needs a deep stack
-  xTaskCreatePinnedToCore(linkTask, "audiolink", 12288, nullptr, 2, nullptr, 0);
+  // Core 0, with Wi-Fi; a TLS handshake and Opus (which works on the stack) need a deep one
+  xTaskCreatePinnedToCore(linkTask, "audiolink", 32768, nullptr, 2, nullptr, 0);
 }

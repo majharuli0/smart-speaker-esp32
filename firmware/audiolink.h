@@ -2,9 +2,12 @@
 // mic up; talk and the AI's voice down), so audio doesn't go through the MQTT
 // broker (its message limit, its queue). Commands and reports stay on MQTT; the
 // server tells us where the link is (retained ss/server/audio). Frames:
-// [type][seq: 2 bytes][payload]: 0x03 mic PCM (16 kHz 16-bit mono), 0x04 talk
-// PCM. Text frames are JSON: our hello first, then talk_start / talk_stop from
-// the server (in order with the audio). While the link is down, audio uses MQTT.
+// [type][seq: 2 bytes][payload]: 0x01 mic Opus, 0x02 talk Opus (each a run of
+// 20 ms frames, every one [length: 2 bytes][frame]); the server also accepts
+// 0x03 / 0x04, raw PCM. Opus (16 kHz mono speech, ~24 kb/s) needs a tenth of the
+// data of raw PCM (256 kb/s). Text frames are JSON: our hello first, then
+// talk_start / talk_stop from the server (in order with the audio). While the
+// link is down, audio uses MQTT (raw PCM).
 #pragma once
 #include <Arduino.h>
 

@@ -123,7 +123,11 @@ Each one ends working, tested and committed. **Only V5 needs the mic.**
 - **Bangla test set** (`voice-lab/commands/`): about 100 recorded commands from 5–10 people, including elderly people, a few dialects and mixed Bangla-English ("রিমাইন্ডার সেট করো", "মেডিসিন", "কল দাও" = set a reminder, medicine, call). Times like সাড়ে আটটা / পৌনে নয়টা / সকাল / রাত / কাল / পরশু (half past 8 / quarter to 9 / morning / night / tomorrow / day after). A script plays them through the backend and reports **% of correct actions**. (Not word accuracy: what matters is whether the right thing happened.)
 - **Done when:** ≥ 85% of the test commands give the right action; the reply starts within 3 s; the phone-mic test sets a real reminder that rings, and a call reaches the family member.
 
-### V4 Wake word on the speaker, with recordings instead of a mic
+### V4 Wake word on the speaker  🟡 *built 2026-10-15: firmware 0.22.0, backend wake API (63 e2e tests), web "Wake word" section; waiting for real takes from the owner's voice*
+- **Changed from the plan:** the mic came first, so the 3 takes are recorded on the speaker itself (no phone recordings, no `voice_sync` downloads): the speaker keeps them in its built-in storage. Wake word chosen: **“হাই মোমো”** (any phrase works: it's whatever the takes say).
+- **Detector** (`firmware/wakecore.cpp`, plain C++; `voice-lab/wake/wakelab.cpp` builds the same file for the PC): words found like the mic's speech detection (+12 dB to notice, edges out to +8 dB, 450 ms of quiet ends a word); 12 MFCCs, mean taken off; DTW against each take, a length check (¾–4⁄3 of the takes); threshold = the takes' average distance from each other × (0.75 + 0.05 × sensitivity).
+- **PC test on generated speech** (8 Gemini voices, each saying the phrase 6 times, with the speaker's real room noise, 1–2 m levels): deltas and liftering made impostors closer, so both were dropped. About 65% detected at sensitivity 5 with many false matches. The generated voices vary far more than one person (0.7–1.7 s for the same phrase, pauses up to 0.6 s), so the real numbers must come from the owner's own takes: the web page's **Test** shows each word's score against the threshold.
+- **Against false wakes:** woken but then nothing heard, or nothing understood: the speaker stays silent (most likely nobody called it). If it still wakes too often, next is a second check in the cloud (the audio of the word against the typed phrase).
 - **Detector**, in plain C++ with no Arduino calls (`firmware/wake/`), so the **same code** builds for the speaker and for a PC test program (`voice-lab/wake/`):
   - 13 MFCCs + deltas (10 ms steps), mean-normalised;
   - DTW against the user's 3 recordings, run only when there's voice;
@@ -134,7 +138,7 @@ Each one ends working, tested and committed. **Only V5 needs the mic.**
 - **App:** **Wake word** screen: record 3 takes (level meter, re-record), sensitivity, **Test** (the score is computed **on the speaker**).
 - **Done when:** the PC targets are met, and Test in the app gives the same scores as the PC program for the same clips.
 
-### V5 Microphone: the whole loop on the speaker  🟡 *mic working 2026-10-15: INMP441 on GPIO 7/8/9, firmware 0.19.0 microphone test (web page → Microphone), audio streamed live on `ss/dev/<id>/mic`; wake word and the voice loop still to do*
+### V5 Microphone: the whole loop on the speaker  🟡 *2026-10-15: mic working (0.19.0); the voice loop (0.20.0, the Ask button); the wake word starts it hands-free (0.22.0: the mic is always on, matched on the speaker, nothing sent until it matches)*
 - **Learned on the prototype:** stream live audio with a direct publish, not the MQTT queue (it sends about one queued message per pass: 3 s of audio took 23 s); gain x1 (`MIC_GAIN_SHIFT 8`): at +12 dB a voice half a metre away clipped; skip the first 300 ms (start-up thump). The background is ~30 dB below speech, mostly electrical; a 100 nF capacitor across the mic's VDD/GND may lower it.
 - **Wiring:** INMP441 on `I2S_NUM_1` (receive), suggested GPIO 7 (SCK), 8 (WS), 9 (SD); check them against the header. L/R to GND, 3V3. Use the same (legacy) I2S driver as `audio.cpp`.
 - **Firmware:**
@@ -169,7 +173,7 @@ Free limits can change. The adapters keep a switch to another provider (Groq Whi
 - A **typed** wake word (microWakeWord, trained from text-to-speech samples).
 - A self-hosted Bangla speech-to-text fallback for working without the AI service.
 - Real echo cancellation, so people can interrupt the speaker.
-- Two-way calls (the family hears the person through the speaker's mic).
+- ~~Two-way calls~~ *done 2026-10-15 (0.22.0):* **📞 Call** on the speaker's web page plays the room live (any family member); hold to talk answers. Half duplex: the speaker sends nothing while it plays the caller's voice (no echo). The speaker plays its cue and shows pink while the room can be heard. The phone app doesn't have it yet (needs a live audio player).
 - More intents: list today's reminders, what time is it, cancel a reminder.
 
 ## Docs to update along the way

@@ -36,5 +36,6 @@ bool isRinging();
 bool isMusic();     // the ringing is music from the file manager, not an alarm
 bool isTalking();
 bool isChiming();
+bool isCueing();
 String ringingToneName();
 bool audioBusy();   // a tone or talk is playing (don't start slow work like mounting a card)

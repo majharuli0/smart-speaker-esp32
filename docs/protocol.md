@@ -38,7 +38,7 @@ Devices connect to the **MQTT broker**, not to the server. Since firmware 0.13.0
 | `ss/dev/<id>/audio` | server → device | 0 | Talk audio (section 4) |
 | `ss/dev/<id>/evt` | device → server | 1 | Everything the device sends: `hello`, 3.6, `boot` |
 | `ss/dev/<id>/online` | device | 1, retained | `1` on connect; the broker publishes `0` if the device drops (last will) |
-| `ss/dev/<id>/mic` | device → server | 0 | Microphone audio (firmware 0.19.0+): 16 kHz 16-bit mono PCM in 125 ms pieces (4,000 bytes), only while a `mic_record` runs |
+| `ss/dev/<id>/mic` | device → server | 0 | Microphone audio (firmware 0.19.0+): 16 kHz 16-bit mono PCM in 125 ms pieces (4,000 bytes), only while a `mic_record` runs. The mic is always on from 0.22.0 (for the wake word), but nothing is sent outside a `mic_record` |
 | `ss/server/online` | server | 1, retained | `1` when up (`0` is its last will). On `1`, a device sends `hello` and its reports again. |
 | `ss/server/http` | server | 1, retained | Base URL for downloads (tones, firmware), e.g. `http://192.168.0.102:3000`; `PUBLIC_URL` overrides it |
 
@@ -132,8 +132,10 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"watch", on}` | On hello, and whenever the first page opens (`true`) or the last one closes (`false`). Sets the stats rate. |
 | `{type:"ota_start", path, version, size, sha256}` | After a browser's `ota`. See section 9. |
 | `{type:"doorbell"}` | Someone rang: play the ding-dong |
-| `{type:"mic_record", seconds, endSilence?}` | Record (1–20 s): the device stops any sound, records, and streams it on `ss/dev/<id>/mic`; the light pulses pink meanwhile. With `endSilence` (ms) it stops by itself once someone has spoken and then been quiet that long (a voice request): speech is 9 dB above the room's background, measured in 50 ms steps. The microphone test and voice requests both use it. Firmware 0.20.0+ (0.19.0 called it `mic_test`, without `endSilence`) |
-| `{type:"mic_stop"}` | End a microphone test early (`stop` does too); `mic_done` still follows |
+| `{type:"mic_record", seconds, endSilence?, live?, wakeTake?, wakeTest?}` | Record (1–20 s): the device stops any sound, records, and streams it on `ss/dev/<id>/mic`; the light pulses pink meanwhile. With `endSilence` (ms) it plays its cue, starts 100 ms after it, and stops by itself once someone has spoken and then been quiet that long (a voice request): speech is 12 dB above the room's background, measured in 50 ms steps. The microphone test and voice requests both use it. Firmware 0.20.0+ (0.19.0 called it `mic_test`, without `endSilence`). From 0.22.0: **`live: true`** is a call (up to 600 s): the cue plays, talk keeps playing, and nothing is sent while the speaker plays sound or for 200 ms after (no echo of the caller); **`wakeTake: 1-3`** keeps the longest word said as that take of the wake word; **`wakeTest: true`** scores the word said against the takes (results in `mic_done`) |
+| `{type:"mic_stop"}` | End a recording or call early (`stop` does too); `mic_done` still follows |
+| `{type:"wake_config", enabled, sensitivity}` | Wake word on/off and sensitivity 1–10 (higher wakes more easily). Sent by the server after `hello` and on change; the device keeps it. Firmware 0.22.0+ |
+| `{type:"wake_clear"}` | Forget the wake word takes (0.22.0+) |
 
 ### 3.6 Device → browsers (relayed to all browsers, with `deviceId` added)
 
@@ -152,7 +154,9 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"stats", ...}` | Every **2 s while a page is open**, otherwise every **5 min** (keeps MQTT traffic low). See 6.1. |
 | `{type:"partitions", ...}` | On connect, and when asked. Measured once at boot. See 6.2. |
 | `{type:"mic_level", rms, peak}` | Every 250 ms during a microphone test: levels in dB of full scale (0 = as loud as it goes), for a live meter. Sent at once (QoS 0), like the audio: the queue for other reports goes out about one message per pass of the MQTT task, far too slow for live data |
-| `{type:"mic_done", samples, pieces, dropped, clipped, slot, gainShift, speech, endedBy}` | The recording ended (`endedBy`: `silence`, `time` or `stop`; `speech`: someone spoke): samples recorded, pieces sent, pieces that couldn't be sent (not connected), samples clipped, which I2S slot the mic answered in (`left`/`right`, its L/R pin), and the gain (`MIC_GAIN_SHIFT`: 8 = x1). `{type:"mic_done", error}` if the mic's I2S port didn't start |
+| `{type:"wake_status", enabled, sensitivity, takes:[s,s,s], threshold, spread, listening}` | The wake word (0.22.0+): each take's length in seconds (0 = none), the match threshold and the takes' average distance from each other, and whether it's listening (on, with all 3 takes). On connect and on every change |
+| `{type:"wake", score, threshold}` | The wake word was heard (score ≤ threshold; lower is closer). Not again for 3 s. The server starts a voice request as the owner |
+| `{type:"mic_done", samples, pieces, dropped, clipped, slot, gainShift, speech, endedBy, floorDb, wake?}` | The recording ended (`endedBy`: `silence`, `time` or `stop`; `speech`: someone spoke): samples recorded, pieces sent, pieces that couldn't be sent (not connected), samples clipped, which I2S slot the mic answered in (`left`/`right`, its L/R pin), and the gain (`MIC_GAIN_SHIFT`: 8 = x1). `{type:"mic_done", error}` if the mic's I2S port didn't start. `wake` (0.22.0+): for a take `{take, ok, seconds?}`; for a test `{test, heard, seconds?, score (null: too long or short to compare), threshold, match}` |
 
 ---
 
@@ -171,6 +175,7 @@ browser: talk_start → binary chunk, chunk, ... → talk_stop
   - On `talk_stop` it plays what's left in the buffer, then stops.
 - **Priority:** an alarm, or a `ring` from the **Test tone** button, stops talk.
 - The mic only works on `https://` or `http://localhost`, a browser rule.
+- **A call, the other way** (0.22.0+): the page sends `listen_start {deviceId}` over its live connection (any family member; answers `{ok, reason}`), the server sends the device `mic_record {seconds: 600, live: true}`, and passes each 125 ms piece on as binary `listen_audio`. `listen_stop`, closing the page, or the device stopping (`listen_end {deviceId}`) end it. Talk works at the same time; the device sends nothing while it plays the caller's voice.
 
 ---
 

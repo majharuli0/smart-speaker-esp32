@@ -1,13 +1,21 @@
-// Microphone: an INMP441 on the second I2S port (pins in config.h). Records on
-// request (the owner's microphone test, or a voice request) and streams it to the
-// server (ss/dev/<id>/mic: 16 kHz 16-bit mono PCM in 125 ms pieces, QoS 0), with
-// its level (mic_level, every 250 ms), then mic_done. The status light shows it's on.
+// Microphone: an INMP441 on the second I2S port (pins in config.h), always on.
+// Its own task reads it and hands the sound to:
+//   - the wake word listener (wake.h), which keeps it on the speaker, and
+//   - a session, when the server asks for one: a recording (the microphone test,
+//     a voice request, a wake word take or test) or the room for a call (live).
+// A session streams to the server (ss/dev/<id>/mic: 16 kHz 16-bit mono PCM in
+// 125 ms pieces, QoS 0), then reports mic_done. The status light shows it's on.
 #pragma once
 
-// Records up to `seconds`. With endSilenceMs it's a voice request: a short cue
-// says it's listening, and it ends by itself once someone has spoken and then been
-// quiet that long. false if a recording is already on (a port that won't start is
-// reported in mic_done).
-bool micRecord(int seconds, int endSilenceMs);
-void micStop();  // end it early (mic_done still follows)
-bool micBusy();  // recording now
+struct MicSession {
+  int seconds;       // at most this long
+  int endSilenceMs;  // a voice request: ends once someone has spoken and then been quiet this long
+  bool live;         // the room for a call: the speaker keeps talking; nothing is sent while it does
+  int wakeTake;      // 1-3: this recording is that take of the wake word
+  bool wakeTest;     // this recording is scored against the takes
+};
+
+void micSetup();                      // after audioSetup and wakeSetup
+bool micRecord(const MicSession &s);  // false if a session is already on
+void micStop();                       // end it early (mic_done still follows)
+bool micBusy();                       // a session is on

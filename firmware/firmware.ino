@@ -9,7 +9,9 @@
 //   ota    - firmware updates over Wi-Fi, with automatic rollback
 //   health - restart reason, crash reports, and a watchdog against freezes
 //   led    - the RGB status light
-//   mic    - the microphone: recordings streamed to the server (test, voice requests)
+//   mic    - the microphone, always on: sessions streamed to the server (test,
+//            voice requests, the room during a call); the rest goes to wake
+//   wake   - the wake word, matched on the speaker (wakecore: the matching itself)
 // Messages are documented in docs/protocol.md.
 #include <ArduinoJson.h>
 #include "config.h"
@@ -24,6 +26,7 @@
 #include "health.h"
 #include "led.h"
 #include "mic.h"
+#include "wake.h"
 
 static void onConnected() {
   netSend("{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\",\"fw\":\"" FW_VERSION "\",\"board\":\"" CONFIG_IDF_TARGET "\"}");
@@ -34,6 +37,7 @@ static void onConnected() {
   sendPartitions();
   otaReport();
   healthReport();
+  wakeReport();
 }
 
 static void onCommand(uint8_t *payload, size_t length) {
@@ -64,8 +68,12 @@ static void onCommand(uint8_t *payload, size_t length) {
   else if (cmd == "ota_start") otaStart(doc);
   else if (cmd == "reset_wifi") resetWifi();
   else if (cmd.startsWith("files_")) filesCommand(doc);
-  else if (cmd == "mic_record") micRecord(doc["seconds"] | 5, doc["endSilence"] | 0);
+  else if (cmd == "mic_record")
+    micRecord({doc["seconds"] | 5, doc["endSilence"] | 0, doc["live"] | false, doc["wakeTake"] | 0,
+               doc["wakeTest"] | false});
   else if (cmd == "mic_stop") micStop();
+  else if (cmd == "wake_config") wakeConfig(doc["enabled"] | false, doc["sensitivity"] | 5);
+  else if (cmd == "wake_clear") wakeClear();
 }
 
 static void onAudio(uint8_t *payload, size_t length) { talkPush(payload, length); }
@@ -78,8 +86,10 @@ void setup() {
   ledSetup();
   audioSetup();
   cacheSetup();  // before statsSetup, which measures the storage it mounts
+  wakeSetup();   // its takes are in that storage
   statsSetup();
   alarmsSetup();
+  micSetup();
   netSetup({onConnected, onCommand, onAudio});
   timeSetup();
   healthWatchdog();  // last: setup may block (formatting storage on first boot)
@@ -94,6 +104,7 @@ void loop() {
   cacheLoop();
   filesLoop();
   otaLoop();
+  wakeLoop();
 
   // Let core 1's idle task run, so CPU load reads true (and the chip runs cooler).
   // Safe for audio: each pass moves 16 ms of sound and the I2S queue holds 128 ms.

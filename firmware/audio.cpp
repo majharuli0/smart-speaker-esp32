@@ -380,4 +380,5 @@ bool isRinging() { return ringing; }
 bool isMusic() { return ringing && music; }
 bool isTalking() { return talking; }
 bool isChiming() { return chiming; }
+bool isCueing() { return cueing; }
 String ringingToneName() { return ringingTone; }

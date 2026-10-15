@@ -79,7 +79,7 @@ account, brings it back to Bluetooth setup. Alarms keep working while it waits.
 
 Board: **ESP32-S3-WROOM-1 N16R8** (16 MB flash, 8 MB PSRAM). The firmware only builds for this board.
 
-Amp wiring (MAX98357A; GAIN and SD unconnected):
+Amp wiring (MAX98357A; GAIN to GND for 12 dB of gain, SD unconnected):
 
 | Amp pin | ESP32-S3 |
 |---|---|
@@ -88,6 +88,7 @@ Amp wiring (MAX98357A; GAIN and SD unconnected):
 | LRC | GPIO 6 |
 | VIN | 5V |
 | GND | GND |
+| GAIN | GND (12 dB) |
 
 Status light (RGB LED, common cathode: the long leg to GND; each color through its own 300 Ω resistor):
 

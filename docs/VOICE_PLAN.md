@@ -104,11 +104,12 @@ Each one ends working, tested and committed. **Only V5 needs the mic.**
 - **Firmware (0.18.0):** obey `fade:false`.
 - **Done when:** a daughter records "আম্মু, এখন ওষুধ খাও" (Mum, take your medicine now) in the app, and it plays at the alarm time on the speaker, including with the internet unplugged.
 
-### V2 Family and calling, without voice  🟡 *built 2026-10-15: backend (`DeviceMember`, family API, push through Firebase, 40 e2e tests), web and app Family screens, call screen; push waits for the Firebase project*
+### V2 Family and calling, without voice  ✅ *done 2026-10-15: backend (`DeviceMember`, family API, push through Firebase, 40 e2e tests), Family screens on web and app, call screen and toast; deployed to the cloud; web push checked (browsers, and iPhone from the Home Screen); push in the phone app waits for its first build with Firebase*
 - **Backend `FamilyModule`:** invite a member by email; `callName` per member; ownership checks extended so members can control the speaker (only the owner can remove it or manage members). **Push notifications** with Firebase Cloud Messaging (free) to every member's phone.
 - **App:** a family screen; an incoming **call** notification opens the speaker page with hold-to-talk ready.
 - **Firmware:** none.
 - **Done when:** two accounts share one speaker, and `POST /devices/:uid/family/:memberId/call` (used later by voice) shows a push on that member's phone, even with the app closed.
+- **Web push (added):** the web app registers a service worker with Firebase (`public/firebase-messaging-sw.js`) and a **Turn on notifications** button; calls and visitor rings reach a closed page, and tapping one opens the speaker. An iPhone needs the site on the Home Screen (iOS 16.4+), so the app has a manifest and icons. While the page is open a toast with **Answer** shows instead. Notifications expire after 5 minutes.
 
 ### V3 The voice brain, tested with the phone mic
 - **Backend `VoiceModule`:**

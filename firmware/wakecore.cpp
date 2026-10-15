@@ -7,10 +7,8 @@ namespace wake {
 static const float PI_F = 3.14159265f;
 static const int BINS = NFFT / 2 + 1;
 static const int MELS = 26;  // mel filters, 60 Hz - 7 kHz
-static const float LOW_HZ = 60, HIGH_HZ = 7000;
+static const float LOW_HZ = 150, HIGH_HZ = 7000;  // from 150 Hz: a fan's rumble is below
 static const float BIG = 1e30f;
-static const float LOUD_X = 16;     // speech: 12 dB above the background
-static const float QUIET_X = 6.3f;  // quiet: under 8 dB above it
 static const int END_QUIET = 45;    // 450 ms of quiet ends a word (a pause between two words is shorter)
 
 // Tables shared by every listener, made once
@@ -69,6 +67,31 @@ static void fft(float *re, float *im) {
   }
 }
 
+static void butterworth(float b0, float b1, float b2, float a0, float a1, float a2, float *out) {
+  out[0] = b0 / a0; out[1] = b1 / a0; out[2] = b2 / a0; out[3] = a1 / a0; out[4] = a2 / a0;
+}
+
+SpeechBand::SpeechBand() {
+  for (int i = 0; i < 4; i++) {
+    bool high = i < 2;
+    float w = 2 * PI_F * (high ? 100 : 1000) / RATE, alpha = sinf(w) / (2 * 0.7071f), c = cosf(w);
+    float k[5];
+    if (high) butterworth((1 + c) / 2, -(1 + c), (1 + c) / 2, 1 + alpha, -2 * c, 1 - alpha, k);
+    else butterworth((1 - c) / 2, 1 - c, (1 - c) / 2, 1 + alpha, -2 * c, 1 - alpha, k);
+    stages[i].b0 = k[0]; stages[i].b1 = k[1]; stages[i].b2 = k[2]; stages[i].a1 = k[3]; stages[i].a2 = k[4];
+  }
+}
+
+float SpeechBand::push(float x) {
+  for (Stage &s : stages) {
+    float y = s.b0 * x + s.b1 * s.x1 + s.b2 * s.x2 - s.a1 * s.y1 - s.a2 * s.y2;
+    s.x2 = s.x1; s.x1 = x;
+    s.y2 = s.y1; s.y1 = y;
+    x = y;
+  }
+  return x;
+}
+
 Listener::Listener() {
   makeTables();
   memset(ring, 0, sizeof(ring));
@@ -113,7 +136,8 @@ bool Listener::push(int16_t sample) {
   prev = sample;
   pos = (pos + 1) % WINDOW;
   if (filled < WINDOW) filled++;
-  hopPower += (float)sample * sample;
+  float b = band.push(sample);
+  hopPower += b * b;
   if (++sinceFrame < HOP) return false;
 
   // Every 10 ms: the level of the last 50 ms, and the MFCCs of the last 25 ms
@@ -127,13 +151,12 @@ bool Listener::push(int16_t sample) {
   frame(history[f % KEEP]);
   levels[f % KEEP] = level;
 
-  // Speech or quiet, as the microphone judges it: against the quietest recent
-  // moments (that background rises ~2 dB a second), speech is 12 dB above it and
-  // above -60 dB; quiet is under 8 dB above it. A stretch is noticed by its
-  // speech, and reaches out to the quiet on either side (the soft sounds at
-  // the start and end of a word count too).
+  // Speech or quiet, as the microphone judges it: in the speech band, against
+  // the quietest recent moments (that background rises ~2 dB a second). A
+  // stretch is noticed by its speech, and reaches out to the quiet on either
+  // side (the soft sounds at the start and end of a word count too).
   floor = floor < 0 || level < floor ? level : floor * 1.00455f;
-  bool loud = level > floor * LOUD_X && level > 1100;
+  bool loud = level > floor * SPEECH_X && level > SPEECH_MIN;
   bool quiet = level < floor * QUIET_X;
   if (start < 0) {
     loudRun = loud ? loudRun + 1 : 0;

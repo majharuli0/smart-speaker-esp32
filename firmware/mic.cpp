@@ -4,6 +4,7 @@
 #include "net.h"
 #include "audio.h"
 #include "wake.h"
+#include "wakecore.h"
 
 static const size_t PIECE = SAMPLE_RATE / 8;  // 125 ms per MQTT message: 8 a second
 static const size_t BLOCK = 256;              // frames per I2S read (16 ms)
@@ -53,13 +54,14 @@ static float dbfs(float v) { return v > 0 ? 20 * log10f(v / 32768) : -120; }
 // word ended, when the server's mic_record says afterWake
 static const uint32_t RING = SAMPLE_RATE * 6;
 static int16_t *ring = nullptr;
+static float *bandRing = nullptr;  // the same, in the speech band (for judging speech)
 static volatile uint32_t written = 0;        // samples heard since power-on
 static volatile uint32_t wakeMark = 0;       // where the last wake word ended
 static volatile unsigned long wakeTime = 0;  // and when it was heard (0: never)
 static const uint32_t WORD_END = SAMPLE_RATE * 45 / 100;  // a word is over after 450 ms of quiet
 static const unsigned long AFTER_WAKE_MS = 4000;  // the server asks within this, or it's too old
 
-static bool wakeFresh() { return ring && wakeTime && millis() - wakeTime < AFTER_WAKE_MS; }
+static bool wakeFresh() { return ring && bandRing && wakeTime && millis() - wakeTime < AFTER_WAKE_MS; }
 
 static void micTask(void *) {
   static int32_t frames[2 * BLOCK];  // [left, right, left, right, …]
@@ -71,27 +73,28 @@ static void micTask(void *) {
   bool first = true;
   uint32_t settle = SETTLE;
   uint32_t speakerQuiet = 0;          // samples since the speaker last made a sound
-  // The room's background: the quietest recent 50 ms window (it drops at once to
-  // a quieter one and rises ~2 dB a second), so someone talking from the very
-  // start isn't taken for the background
-  int64_t windowSum = 0;
+  // The room's background, in the speech band (wake::SpeechBand): the quietest
+  // recent 50 ms window (it drops at once to a quieter one and rises ~2 dB a
+  // second), so someone talking from the very start isn't taken for the background
+  wake::SpeechBand band;
+  float windowSum = 0;
   uint32_t windowCount = 0;
   float floor = -1;
-  // The session under way. Speech or quiet, per 50 ms window: speech is 12 dB
-  // above the background; quiet is under 8 dB above it (on the prototype the
-  // background wanders 0-8 dB above its floor, and speech is 15-34 dB above).
+  // The session under way. Speech or quiet, per 50 ms window in the speech band
+  // (thresholds in wakecore.h, shared with the wake word).
   MicSession s = {};
   bool on = false, capturing = false;
   uint32_t gap = 0, want = 0, total = 0, clipped = 0, pieces = 0, dropped = 0, loudRun = 0, quietMs = 0;
   size_t fill = 0;
   bool heard = false, silenceEnded = false;
-  int64_t sessionSum = 0, levelSum = 0;
+  float sessionSum = 0;
+  int64_t levelSum = 0;
   uint32_t sessionCount = 0, levelCount = 0;
   int32_t levelPeak = 0;
   char json[360];
 
-  // One sample of the session: sent, and judged speech or quiet
-  auto capture = [&](int16_t y, bool over) {
+  // One sample of the session (and its speech-band value): sent, and judged speech or quiet
+  auto capture = [&](int16_t y, float banded, bool over) {
     total++;
     if (over) clipped++;
     piece[fill++] = y;
@@ -100,14 +103,15 @@ static void micTask(void *) {
       else dropped++;  // not connected: lost, never piled up
       fill = 0;
     }
-    sessionSum += (int64_t)y * y;
+    sessionSum += banded * banded;
     if (++sessionCount == WINDOW) {
-      float power = (float)sessionSum / WINDOW;
-      sessionSum = sessionCount = 0;
-      bool loud = power > floor * 16 && power > 1100;  // +12 dB, and above -60 dB
+      float power = sessionSum / WINDOW;
+      sessionSum = 0;
+      sessionCount = 0;
+      bool loud = power > floor * wake::SPEECH_X && power > wake::SPEECH_MIN;
       loudRun = loud ? loudRun + 1 : 0;
       if (loudRun >= 2) heard = true;  // 100 ms of it: someone is speaking
-      if (power < floor * 6.3f) {      // under +8 dB
+      if (power < floor * wake::QUIET_X) {
         if (heard) quietMs += 50;
       } else quietMs = 0;
       if (s.endSilenceMs && heard && quietMs >= (uint32_t)s.endSilenceMs) silenceEnded = true;
@@ -134,13 +138,15 @@ static void micTask(void *) {
       total = clipped = pieces = dropped = loudRun = quietMs = 0;
       fill = 0;
       heard = silenceEnded = false;
-      sessionSum = levelSum = levelPeak = sessionCount = levelCount = 0;
+      sessionSum = 0;
+      levelSum = levelPeak = sessionCount = levelCount = 0;
       wakeSessionStart(s.wakeTake, s.wakeTest);
       // Straight after the wake word: from where it ended, at once
       if (s.afterWake && wakeFresh()) {
         capturing = true;
         uint32_t from = written - wakeMark > RING ? written - RING : wakeMark;
-        for (uint32_t i = from; i != written && !silenceEnded && total < want; i++) capture(ring[i % RING], false);
+        for (uint32_t i = from; i != written && !silenceEnded && total < want; i++)
+          capture(ring[i % RING], bandRing[i % RING], false);
         wakeTime = 0;
       }
     }
@@ -178,7 +184,11 @@ static void micTask(void *) {
       if (settle) { settle--; continue; }
       bool over = y > 32767 || y < -32768;
       y = constrain(y, -32768, 32767);
-      if (ring) ring[written % RING] = (int16_t)y;
+      float banded = band.push(y);
+      if (ring) {
+        ring[written % RING] = (int16_t)y;
+        bandRing[written % RING] = banded;
+      }
       written = written + 1;
       bool echoFree = speakerQuiet >= ECHO;
       if (speakerQuiet < ECHO) speakerQuiet++;
@@ -187,10 +197,11 @@ static void micTask(void *) {
         wakeTime = millis() | 1;
       }
 
-      windowSum += (int64_t)y * y;
+      windowSum += banded * banded;
       if (++windowCount == WINDOW) {
-        float power = (float)windowSum / WINDOW;
-        windowSum = windowCount = 0;
+        float power = windowSum / WINDOW;
+        windowSum = 0;
+        windowCount = 0;
         floor = floor < 0 || power < floor ? power : floor * 1.023f;
       }
       if (!on || !capturing || silenceEnded || total >= want) continue;
@@ -198,7 +209,7 @@ static void micTask(void *) {
         total++;
         continue;
       }
-      capture((int16_t)y, over);
+      capture((int16_t)y, banded, over);
     }
 
     if (on && (stopAsked || silenceEnded || total >= want)) {
@@ -226,6 +237,8 @@ static void micTask(void *) {
 
 void micSetup() {
   ring = (int16_t *)heap_caps_malloc(RING * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  bandRing = (float *)heap_caps_malloc(RING * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!bandRing) ring = nullptr;  // both or neither
   portOk = portStart();
   if (!portOk) {
     Serial.println("Microphone: its I2S port didn't start");

@@ -1,7 +1,8 @@
 // Wake word matching, in plain C++ (no Arduino), so the PC test program in
 // voice-lab/wake builds exactly the code the speaker runs.
 //   Words: a stretch of speech 0.25-2.5 s long, with quiet before and after it
-//     (judged against the room's background, as the microphone does).
+//     (judged against the room's background in the speech band, as the
+//     microphone does: see SpeechBand).
 //   Features: every 10 ms, 12 MFCCs of a 25 ms window; the average over the word
 //     is taken off, so the mic and the room matter less. (Tested on Bangla clips
 //     in voice-lab/wake: deltas and liftering made impostors score closer.)
@@ -23,6 +24,26 @@ const int TAKES = 3;          // recordings of the wake word
 const float NO_MATCH = 1e9f;  // distance when two words can't be compared
 const int NFFT = 512;
 
+// Speech or not is judged in 100-1000 Hz, where a voice is strongest and a
+// ceiling fan is weakest. Measured on the prototype with a fan on: across all
+// frequencies the fan alone wandered up to 8.6 dB above its quietest moments and
+// a voice a few metres away reached only 11.8 dB; in this band the fan stayed
+// under 3 dB and the same voice reached 15.4 dB.
+class SpeechBand {
+ public:
+  SpeechBand();
+  float push(float x);  // the next sample, band-passed
+
+ private:
+  struct Stage {
+    float b0, b1, b2, a1, a2, x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  };
+  Stage stages[4];  // two 100 Hz high-passes, two 1 kHz low-passes (Butterworth)
+};
+const float SPEECH_X = 10;  // speech: 10 dB above the background, in the band…
+const float QUIET_X = 3.2f;  // …quiet: under 5 dB above it
+const float SPEECH_MIN = 300;  // and speech is above -65 dB (mean square, 16-bit)
+
 struct Word {
   int n = 0;  // frames
   float f[MAX_FRAMES][CEPS];
@@ -41,11 +62,12 @@ class Listener {
   void frame(float *mfcc);
   void ended(long first, long last);
 
+  SpeechBand band;       // for the level
   float ring[WINDOW];    // the last 25 ms of samples (pre-emphasised)
   int pos = 0, sinceFrame = 0, filled = 0;
   float re[NFFT], im[NFFT];  // FFT work area
   float prev = 0;        // for pre-emphasis
-  float hopPower = 0;    // this 10 ms
+  float hopPower = 0;    // this 10 ms, in the speech band
   float recent[5] = {};  // the last 5 x 10 ms, for a 50 ms level
   int recentAt = 0;
   float floor = -1;      // the quietest recent 50 ms

@@ -43,7 +43,9 @@ template <typename T> static T *make(int count) {
 
 static bool allTakes() { return have[0] && have[1] && have[2]; }
 
-static String path(int take) { return "/wake/take" + String(take) + ".bin"; }
+// The features' version is in the name: takes made with older features (0.22-0.23:
+// from 60 Hz) don't compare with new words, so they're left unused (record again)
+static String path(int take) { return "/wake/take" + String(take) + "-v2.bin"; }
 
 static void computeLimit() {
   float s = 0;

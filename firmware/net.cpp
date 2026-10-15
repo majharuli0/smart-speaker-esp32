@@ -7,6 +7,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_wifi.h"
 #include "mbedtls/md.h"
+#include "mbedtls/platform.h"
 #include "config.h"
 #include "audiolink.h"
 
@@ -272,7 +273,19 @@ static void startBluetoothSetup() {
 
 static void stopBluetoothSetup() { network_prov_mgr_deinit(); }  // safe to call twice
 
+// TLS memory: this build gives TLS internal RAM only, and two connections (the
+// broker and the audio link) don't fit there with the rest (the second fails
+// with MBEDTLS_ERR_SSL_ALLOC_FAILED). Its big buffers (~16 KB each) go to PSRAM.
+static void *tlsCalloc(size_t n, size_t size) {
+  void *p = nullptr;
+  if (n * size > 1024) p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!p) p = heap_caps_calloc(n, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (!p) p = heap_caps_calloc(n, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  return p;
+}
+
 void netSetup(const NetHandlers &h) {
+  mbedtls_platform_set_calloc_free(tlsCalloc, heap_caps_free);  // before any TLS
   handlers = h;
   makeDeviceId();
   topicCmd = "ss/dev/" + deviceId + "/cmd";

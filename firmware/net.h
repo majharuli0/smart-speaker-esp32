@@ -21,5 +21,10 @@ bool netInSetup();                   // waiting for Wi-Fi details over Bluetooth
 String netTakeClaim();               // the setup token the app sent over Bluetooth, once ("" if none)
 void netSend(const String &json);    // to the server (ss/dev/<id>/evt)
 void netSend(const char *json);
+// Live data, sent at once from the calling task (QoS 0, never queued): false if it
+// couldn't go. netSend's queue goes out about one message per pass of the MQTT
+// task: fine for reports, far too slow for 8 audio pieces a second.
+bool netSendMic(const uint8_t *pcm, size_t length);  // microphone audio (ss/dev/<id>/mic)
+bool netSendNow(const char *json);                   // a live reading (ss/dev/<id>/evt)
 String serverHttp();                 // base URL for downloads, e.g. "http://192.168.0.102:3000", "" if unknown
 void resetWifi();                    // forget Wi-Fi and restart into Bluetooth setup

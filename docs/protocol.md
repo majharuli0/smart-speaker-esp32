@@ -38,6 +38,7 @@ Devices connect to the **MQTT broker**, not to the server. Since firmware 0.13.0
 | `ss/dev/<id>/audio` | server → device | 0 | Talk audio (section 4) |
 | `ss/dev/<id>/evt` | device → server | 1 | Everything the device sends: `hello`, 3.6, `boot` |
 | `ss/dev/<id>/online` | device | 1, retained | `1` on connect; the broker publishes `0` if the device drops (last will) |
+| `ss/dev/<id>/mic` | device → server | 0 | Microphone audio (firmware 0.19.0+): 16 kHz 16-bit mono PCM in 125 ms pieces (4,000 bytes), only while a `mic_test` runs |
 | `ss/server/online` | server | 1, retained | `1` when up (`0` is its last will). On `1`, a device sends `hello` and its reports again. |
 | `ss/server/http` | server | 1, retained | Base URL for downloads (tones, firmware), e.g. `http://192.168.0.102:3000`; `PUBLIC_URL` overrides it |
 
@@ -46,7 +47,7 @@ Devices connect to the **MQTT broker**, not to the server. Since firmware 0.13.0
   - each device logs in **as itself**: username = client ID = its device ID, password = HMAC-SHA256(`DEVICE_SECRET`, `"mqtt:" + id`) in hex. It's not the label code, so the printed label doesn't reveal it;
   - the backend logs in with `MQTT_USERNAME` / `MQTT_PASSWORD` (its `.env`) and may use every topic;
   - anything else is refused.
-- **Topics, decided by the backend** (`/api/v1/broker/acl`): a device may only publish its own `evt` and `online`, and only subscribe to its own `cmd` and `audio` plus `ss/server/online` and `ss/server/http`. So one device can't listen to, command, or pose as another.
+- **Topics, decided by the backend** (`/api/v1/broker/acl`): a device may only publish its own `evt`, `online` and `mic`, and only subscribe to its own `cmd` and `audio` plus `ss/server/online` and `ss/server/http`. So one device can't listen to, command, or pose as another.
 - **Address:** `MQTT_URI` in `firmware/secrets.h` (not in git; template `secrets.example.h`). On your own network: `mqtt://speaker-server.local:1883`. The backend answers that name over mDNS with its computer's current address. The device looks it up before connecting, and again if the broker has been unreachable for 30 s (firmware 0.13.1+), so the computer's address may change. On the cloud server it becomes `mqtts://<domain>:8883`, checked against the ESP32's built-in bundle of trusted roots (no certificate file embedded).
 - **Old firmware** (before 0.11.0) still connects by WebSocket, and the server accepts both.
 
@@ -131,6 +132,8 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"watch", on}` | On hello, and whenever the first page opens (`true`) or the last one closes (`false`). Sets the stats rate. |
 | `{type:"ota_start", path, version, size, sha256}` | After a browser's `ota`. See section 9. |
 | `{type:"doorbell"}` | Someone rang: play the ding-dong |
+| `{type:"mic_test", seconds}` | The owner's microphone test (1–20 s): the device stops any sound, records, and streams it on `ss/dev/<id>/mic`; the light pulses pink meanwhile. Firmware 0.19.0+ |
+| `{type:"mic_stop"}` | End a microphone test early (`stop` does too); `mic_done` still follows |
 
 ### 3.6 Device → browsers (relayed to all browsers, with `deviceId` added)
 
@@ -148,6 +151,8 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"repeat", on}` | On connect, and after any `repeat` request |
 | `{type:"stats", ...}` | Every **2 s while a page is open**, otherwise every **5 min** (keeps MQTT traffic low). See 6.1. |
 | `{type:"partitions", ...}` | On connect, and when asked. Measured once at boot. See 6.2. |
+| `{type:"mic_level", rms, peak}` | Every 250 ms during a microphone test: levels in dB of full scale (0 = as loud as it goes), for a live meter. Sent at once (QoS 0), like the audio: the queue for other reports goes out about one message per pass of the MQTT task, far too slow for live data |
+| `{type:"mic_done", samples, pieces, dropped, clipped, slot, gainShift}` | The microphone test ended: samples recorded, pieces sent, pieces that couldn't be sent (not connected), samples clipped, which I2S slot the mic answered in (`left`/`right`, its L/R pin), and the gain (`MIC_GAIN_SHIFT`: 8 = x1). `{type:"mic_done", error}` if the mic's I2S port didn't start |
 
 ---
 

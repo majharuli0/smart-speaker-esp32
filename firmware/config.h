@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.18.0"
+#define FW_VERSION "0.19.0"
 
 // ---- Broker address and device secret: in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -65,6 +65,19 @@
 #define SD_MISO_GPIO 13
 #define SD_SPI_HZ    8000000  // 8 MHz: plenty for audio, reliable over jumper wires
 #define SD_CHECK_MS  5000     // how often to notice a card being inserted or removed
+
+// INMP441 microphone on the second I2S port (receive). VDD to 3V3 (not 5 V), L/R
+// to GND. GPIO 7-9 were free; keep its wires short and away from the amp's.
+#define MIC_PORT      I2S_NUM_1
+#define MIC_BCLK_GPIO 7   // SCK
+#define MIC_WS_GPIO   8   // WS
+#define MIC_SD_GPIO   9   // SD: the mic's data out
+// The mic gives 24-bit samples; speech at a metre is ~ -60 dB of their full scale.
+// Kept as 16-bit with this much gain: 8 is x1, 6 would be x4 (+12 dB). Measured on
+// the prototype: at +12 dB a voice half a metre away clipped (peaks at 0 dB); at x1
+// it peaks near -12 dB. A quiet recording can be made louder later, a clipped one can't.
+#define MIC_GAIN_SHIFT 8
+#define MIC_TEST_MAX_S 20     // a test recording is at most this long
 
 // Live voice from the browser (same 16 kHz mono format as tones). It arrives in
 // 125 ms pieces (the cloud broker allows the server only 10 messages a second).

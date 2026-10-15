@@ -20,7 +20,7 @@ String devicePop;
 
 static NetHandlers handlers;
 static esp_mqtt_client_handle_t mqtt = nullptr;
-static String topicCmd, topicAudio, topicEvt, topicOnline;
+static String topicCmd, topicAudio, topicEvt, topicOnline, topicMic;
 static volatile bool brokerUp = false;  // set on the MQTT task
 static volatile bool bluetoothOn = false;  // Wi-Fi setup over Bluetooth in progress (set on the event task)
 static volatile bool credsReceived = false;  // the app sent Wi-Fi details in this setup session
@@ -274,6 +274,7 @@ void netSetup(const NetHandlers &h) {
   topicAudio = "ss/dev/" + deviceId + "/audio";
   topicEvt = "ss/dev/" + deviceId + "/evt";
   topicOnline = "ss/dev/" + deviceId + "/online";
+  topicMic = "ss/dev/" + deviceId + "/mic";
   inbox = xQueueCreate(64, sizeof(Inbox));
   makePop();
   String uid = deviceId.substring(6);  // people see the 12-character UID; "esp32-" stays internal
@@ -387,6 +388,14 @@ void netSend(const char *json) {
 }
 
 void netSend(const String &json) { netSend(json.c_str()); }
+
+bool netSendMic(const uint8_t *pcm, size_t length) {
+  return brokerUp && esp_mqtt_client_publish(mqtt, topicMic.c_str(), (const char *)pcm, length, 0, 0) >= 0;
+}
+
+bool netSendNow(const char *json) {
+  return brokerUp && esp_mqtt_client_publish(mqtt, topicEvt.c_str(), json, strlen(json), 0, 0) >= 0;
+}
 
 // Forget the Wi-Fi and restart: the device comes back in Bluetooth setup
 void resetWifi() {

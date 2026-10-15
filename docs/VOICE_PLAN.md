@@ -133,7 +133,8 @@ Each one ends working, tested and committed. **Only V5 needs the mic.**
 - **App:** **Wake word** screen: record 3 takes (level meter, re-record), sensitivity, **Test** (the score is computed **on the speaker**).
 - **Done when:** the PC targets are met, and Test in the app gives the same scores as the PC program for the same clips.
 
-### V5 Microphone: the whole loop on the speaker
+### V5 Microphone: the whole loop on the speaker  🟡 *mic working 2026-10-15: INMP441 on GPIO 7/8/9, firmware 0.19.0 microphone test (web page → Microphone), audio streamed live on `ss/dev/<id>/mic`; wake word and the voice loop still to do*
+- **Learned on the prototype:** stream live audio with a direct publish, not the MQTT queue (it sends about one queued message per pass: 3 s of audio took 23 s); gain x1 (`MIC_GAIN_SHIFT 8`): at +12 dB a voice half a metre away clipped; skip the first 300 ms (start-up thump). The background is ~30 dB below speech, mostly electrical; a 100 nF capacitor across the mic's VDD/GND may lower it.
 - **Wiring:** INMP441 on `I2S_NUM_1` (receive), suggested GPIO 7 (SCK), 8 (WS), 9 (SD); check them against the header. L/R to GND, 3V3. Use the same (legacy) I2S driver as `audio.cpp`.
 - **Firmware:**
   - the mic feeds `wake.cpp` (the input switches from test clips to the mic);

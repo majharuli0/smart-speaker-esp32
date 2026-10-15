@@ -110,9 +110,10 @@ Status light (RGB LED, common cathode: the long leg to GND; each color through i
 | Purple | Someone is talking through it |
 | Cyan, blinking | Doorbell |
 | Blue, fast blink | Firmware updating: don't unplug |
+| Pink, pulsing | The microphone is on (always shown while it records) |
 | White, flashing | "Find my speaker" (Blink button) |
 
-The most important one shows when several apply (top of this order wins: updating, find, music, ringing, talking, doorbell, setup, offline, connecting, online).
+The most important one shows when several apply (top of this order wins: updating, microphone, find, music, ringing, talking, doorbell, setup, offline, connecting, online).
 
 microSD card module (SPI, powered from **3V3** unless the module has its own regulator; card formatted FAT32):
 
@@ -124,6 +125,19 @@ microSD card module (SPI, powered from **3V3** unless the module has its own reg
 | MISO | GPIO 13 |
 | VCC | 3V3 |
 | GND | GND |
+
+INMP441 microphone (I2S, the second port; **3.3 V only**). Keep its wires short and away from the amp's:
+
+| Mic pin | ESP32-S3 |
+|---|---|
+| VDD | **3V3** (not 5V) |
+| GND | GND |
+| SCK | GPIO 7 |
+| WS | GPIO 8 |
+| SD | GPIO 9 |
+| L/R | GND (left channel) |
+
+Check it from the web app: the speaker's page → **Microphone** → **Record a test** (owner only).
 
 Arduino IDE settings, if not using `./fw.sh`: Board **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM
 **OPI PSRAM**, Partition Scheme **16M Flash (3MB APP/9.9MB FATFS)**, library **ArduinoJson** (v7),

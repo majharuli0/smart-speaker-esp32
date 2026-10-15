@@ -9,6 +9,7 @@
 //   ota    - firmware updates over Wi-Fi, with automatic rollback
 //   health - restart reason, crash reports, and a watchdog against freezes
 //   led    - the RGB status light
+//   mic    - the microphone (a test recording, streamed to the server)
 // Messages are documented in docs/protocol.md.
 #include <ArduinoJson.h>
 #include "config.h"
@@ -22,6 +23,7 @@
 #include "ota.h"
 #include "health.h"
 #include "led.h"
+#include "mic.h"
 
 static void onConnected() {
   netSend("{\"type\":\"hello\",\"role\":\"device\",\"deviceId\":\"" + deviceId + "\",\"fw\":\"" FW_VERSION "\",\"board\":\"" CONFIG_IDF_TARGET "\"}");
@@ -42,7 +44,7 @@ static void onCommand(uint8_t *payload, size_t length) {
 
   if (cmd == "blink") ledIdentify();
   else if (cmd == "ring") toneStart(doc["tone"] | "");
-  else if (cmd == "stop") { toneStop(); talkStop(); }
+  else if (cmd == "stop") { toneStop(); talkStop(); micStop(); }
   else if (cmd == "snooze") alarmsSnooze();
   else if (cmd == "talk_start") talkStart();
   else if (cmd == "talk_stop") talkFinish();  // finish what's buffered, then stop
@@ -62,6 +64,8 @@ static void onCommand(uint8_t *payload, size_t length) {
   else if (cmd == "ota_start") otaStart(doc);
   else if (cmd == "reset_wifi") resetWifi();
   else if (cmd.startsWith("files_")) filesCommand(doc);
+  else if (cmd == "mic_test") micTest(doc["seconds"] | 5);
+  else if (cmd == "mic_stop") micStop();
 }
 
 static void onAudio(uint8_t *payload, size_t length) { talkPush(payload, length); }

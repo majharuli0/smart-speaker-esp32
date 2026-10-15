@@ -28,6 +28,20 @@ enum Turn { WAITING, SPEAKING, THINKING, REPLYING };
 static volatile Turn turn = WAITING;
 static const uint32_t TURN_MAX_MS = 20000;   // a turn this long is ended anyway
 static const uint32_t THINK_MAX_MS = 12000;  // no answer this long: the person's turn again
+// Interrupting (barge-in): while the speaker plays, the mic hears it through
+// echo cancellation, and what's left of it mustn't pass for the person. So
+// over the speaker, speech must be (for BARGE_RUN windows):
+// - BARGE_X louder than usual, against the room's background (not the
+//   cancelled audio's: the canceller makes that near silence while it plays);
+// - mostly kept by the canceller: its own echo it takes away (by 15-30 dB),
+//   a person's voice it doesn't (double-talk);
+// - not in the first BARGE_GRACE_MS of the sound: the canceller is still
+//   catching up with it then.
+static const float BARGE_X = 4;               // +6 dB: 16 dB above the background
+static const uint32_t BARGE_RUN = 6;          // 300 ms
+static const float BARGE_KEPT = 0.2f;         // the cancelled audio is at least this much of the mic's (-7 dB)
+static const uint32_t BARGE_GRACE_MS = 800;
+static volatile bool bargeIn = false;  // the person spoke over the AI: the main loop cuts it (talkStop)
 
 // The mic answers in one slot of each stereo frame (which one, its L/R pin
 // decides): both are read, and the louder one is kept
@@ -157,6 +171,13 @@ static void micTask(void *) {
   uint64_t aecUs = 0;             // time spent cancelling, and in how many chunks
   uint32_t aecChunks = 0;
   bool aecOn = false;
+  bool playing = false;           // the speaker is making a sound, or just was
+  float rawPower = 0;             // the mic's latest 50 ms window (speech band), before cancelling
+  float outWin[BARGE_RUN] = {}, rawWin[BARGE_RUN] = {};  // the last windows over the speaker: cancelled, and not
+  uint32_t playMs = 0;            // how long the speaker has been playing
+  double replyOut = 0, replyRaw = 0;  // over this sound: how much the canceller took away (logged)
+  float echoPeak = 0;             // the loudest window while playing (x background): for tuning BARGE_X
+  uint32_t barges = 0;
   uint32_t turnMs = 0;  // in this turn (waiting, speaking or thinking)
   bool idleEnded = false;
   char json[360];
@@ -189,15 +210,53 @@ static void micTask(void *) {
       float power = sessionSum / WINDOW;
       sessionSum = 0;
       sessionCount = 0;
-      bool loud = power > floor * wake::SPEECH_X && power > wake::SPEECH_MIN;
+      float fl = floor;
+      bool strict = aecOn && playing;  // over the speaker's own sound
+      float x = strict ? BARGE_X : 1;
+      float kept = 1;  // over the last BARGE_RUN windows: the cancelled audio / the mic's
+      if (strict) {
+        if (fl > 0 && power / fl > echoPeak) echoPeak = power / fl;
+        float o = 0, r = 0;
+        for (uint32_t k = BARGE_RUN - 1; k > 0; k--) {
+          outWin[k] = outWin[k - 1];
+          rawWin[k] = rawWin[k - 1];
+        }
+        outWin[0] = power;
+        rawWin[0] = rawPower;
+        for (uint32_t k = 0; k < BARGE_RUN; k++) {
+          o += outWin[k];
+          r += rawWin[k];
+        }
+        kept = r > 0 ? o / r : 1;
+        playMs += 50;
+        replyOut += power;
+        replyRaw += rawPower;
+      } else if (playMs) {
+        if (replyOut > 0)
+          Serial.printf("Echo cancellation: %.1f dB taken away over %lu ms of sound\n", 10 * log10(replyRaw / replyOut),
+                        (unsigned long)playMs);
+        playMs = 0;
+        replyOut = replyRaw = 0;
+        memset(outWin, 0, sizeof(outWin));
+        memset(rawWin, 0, sizeof(rawWin));
+      }
+      bool loud = power > fl * wake::SPEECH_X * x && power > wake::SPEECH_MIN * x;
+      if (strict && (kept < BARGE_KEPT || playMs < BARGE_GRACE_MS)) loud = false;  // its own echo, or too early to tell
       loudRun = loud ? loudRun + 1 : 0;
-      if (loudRun >= 2) heard = true;  // 100 ms of it: someone is speaking
-      if (power < floor * wake::QUIET_X) {
+      uint32_t run = strict ? BARGE_RUN : 2;  // 100 ms of it (300 ms over the speaker): someone is speaking
+      if (loudRun >= run) heard = true;
+      if (power < fl * wake::QUIET_X) {
         if (heard) quietMs += 50;
       } else quietMs = 0;
       if (s.conversation) {
         turnMs += 50;
-        if (turn != SPEAKING && loudRun >= 2) {  // they speak (again, if the AI is still thinking)
+        if (turn != SPEAKING && loudRun >= run) {  // they speak (again, if the AI is still thinking; over it, if it's speaking)
+          if (turn == REPLYING) {
+            bargeIn = true;
+            barges++;
+            Serial.printf("Barge-in: %.1f dB over the background, %.1f dB kept, %lu ms into the sound\n",
+                          10 * log10f(power / fl), 10 * log10f(kept), (unsigned long)playMs);
+          }
           turn = SPEAKING;
           turnMs = quietMs = 0;
           turnEvent("speaking");
@@ -243,9 +302,13 @@ static void micTask(void *) {
       turnMs = 0;
       idleEnded = false;
       wakeSessionStart(s.wakeTake, s.wakeTest);
-      aecOn = s.aec && snapSteady != INT32_MIN && aecReady();
+      // Echo cancellation: asked for, or in a conversation if interrupting is on (BARGE_IN)
+      aecOn = (s.aec || (s.conversation && BARGE_IN)) && snapSteady != INT32_MIN && aecReady();
       aecFill = 0;
       aecUs = aecChunks = 0;
+      echoPeak = 0;
+      barges = 0;
+      bargeIn = false;
       // Straight after the wake word: from where it ended, at once
       if (s.afterWake && wakeFresh()) {
         capturing = true;
@@ -285,7 +348,7 @@ static void micTask(void *) {
     // A conversation: the AI speaking is its turn; when it's done, a beep, and
     // it's the person's turn again
     if (on && s.conversation) {
-      if (isTalking()) turn = REPLYING;
+      if (isTalking() && turn != SPEAKING) turn = REPLYING;  // (not when they've just spoken over it: it's being cut)
       else if (turn == REPLYING && !audioBusy()) {
         turn = WAITING;
         turnMs = 0;
@@ -316,6 +379,7 @@ static void micTask(void *) {
       written = written + 1;
       bool echoFree = speakerQuiet >= ECHO;
       if (speakerQuiet < ECHO) speakerQuiet++;
+      playing = !echoFree;
       if (echoFree && wakeHear((int16_t)y)) {  // the wake word: it ended a moment ago
         uint32_t back = WORD_END + (uint32_t)wakeHeardFrames() * wake::HOP + BEFORE_WORD;
         wakeMark = written > back ? written - back : 0;
@@ -327,10 +391,13 @@ static void micTask(void *) {
         float power = windowSum / WINDOW;
         windowSum = 0;
         windowCount = 0;
-        floor = floor < 0 || power < floor ? power : floor * 1.023f;
+        rawPower = power;
+        if (!playing) floor = floor < 0 || power < floor ? power : floor * 1.023f;  // the room's, not the speaker's
       }
       if (!on || !capturing || silenceEnded || idleEnded || total >= want) continue;
-      if ((s.live || s.conversation) && !echoFree) {  // the caller's or the AI's voice is playing: send nothing
+      // The caller's or the AI's voice is playing: send nothing (with echo
+      // cancellation a conversation goes on: the person may speak over it)
+      if ((s.live || (s.conversation && !aecOn)) && !echoFree) {
         total++;
         continue;
       }
@@ -373,6 +440,10 @@ static void micTask(void *) {
                         "\"aecUsPerChunk\":%lu}",
                         (unsigned long)rxStart, (unsigned long)tx, (long)snapSteady, aecOn ? "true" : "false", aecChunk,
                         (unsigned long)(aecChunks ? aecUs / aecChunks : 0));
+      else if (s.conversation && aecOn)  // how interrupting went: for tuning BARGE_X
+        len += snprintf(json + len, sizeof(json) - len - 2,
+                        ",\"aec\":{\"barges\":%lu,\"echoPeakDb\":%.1f,\"usPerChunk\":%lu}", (unsigned long)barges,
+                        echoPeak > 0 ? 10 * log10f(echoPeak) : 0.0f, (unsigned long)(aecChunks ? aecUs / aecChunks : 0));
       snprintf(json + len, sizeof(json) - len, "}");
       netSend(json);
       Serial.printf("Microphone session over (%s): %lu samples, %lu clipped\n", endedBy, (unsigned long)total,
@@ -397,6 +468,12 @@ void micSetup() {
   }
   // Its own task, so a busy main loop doesn't lose audio; core 1, like the loop (Wi-Fi is on core 0)
   xTaskCreatePinnedToCore(micTask, "mic", 12288, nullptr, 3, nullptr, 1);  // echo cancellation runs here too
+}
+
+void micLoop() {
+  if (!bargeIn) return;
+  bargeIn = false;
+  talkStop();  // at once; what the server still sends is dropped until its next talk_start
 }
 
 bool micRecord(const MicSession &s) {

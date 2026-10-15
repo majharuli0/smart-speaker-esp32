@@ -109,6 +109,7 @@ void loop() {
   filesLoop();
   otaLoop();
   wakeLoop();
+  micLoop();
 
   // Let core 1's idle task run, so CPU load reads true (and the chip runs cooler).
   // Safe for audio: each pass moves 16 ms of sound and the I2S queue holds 128 ms.

@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.29.0"
+#define FW_VERSION "0.30.0"
 
 // ---- Broker address and device secret: in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -83,6 +83,9 @@
 // counters). D = the lowest (rx - tx) seen since boot + this calibration, measured
 // with the echo test on this hardware (the amp's and the mic's buffering).
 #define AEC_DELAY_CAL 1318  // measured 2026-10-16 over two boots (1325, 1311): the amp's 64 ms queue + the mic's buffering
+// Interrupting the AI by speaking over it (echo cancellation in conversations).
+// Off: the first try stopped it on its own echo and on noise; being tuned.
+#define BARGE_IN 0
 
 // Live voice from the browser (same 16 kHz mono format as tones). It arrives in
 // 125 ms pieces (the cloud broker allows the server only 10 messages a second).

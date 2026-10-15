@@ -29,4 +29,5 @@ void micSetup();                      // after audioSetup and wakeSetup
 bool micRecord(const MicSession &s);  // false if a session is already on
 void micStop(bool quiet = false);     // end it early (mic_done still follows); quiet: no end tone
 bool micBusy();                       // a session is on
+void micLoop();                       // main loop: cuts the AI's voice when the person speaks over it
 MicState micState();                  // and what it's doing (for the light)

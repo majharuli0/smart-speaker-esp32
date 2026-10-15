@@ -9,7 +9,7 @@
 //   ota    - firmware updates over Wi-Fi, with automatic rollback
 //   health - restart reason, crash reports, and a watchdog against freezes
 //   led    - the RGB status light
-//   mic    - the microphone (a test recording, streamed to the server)
+//   mic    - the microphone: recordings streamed to the server (test, voice requests)
 // Messages are documented in docs/protocol.md.
 #include <ArduinoJson.h>
 #include "config.h"
@@ -64,7 +64,7 @@ static void onCommand(uint8_t *payload, size_t length) {
   else if (cmd == "ota_start") otaStart(doc);
   else if (cmd == "reset_wifi") resetWifi();
   else if (cmd.startsWith("files_")) filesCommand(doc);
-  else if (cmd == "mic_test") micTest(doc["seconds"] | 5);
+  else if (cmd == "mic_record") micRecord(doc["seconds"] | 5, doc["endSilence"] | 0);
   else if (cmd == "mic_stop") micStop();
 }
 

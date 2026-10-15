@@ -111,7 +111,8 @@ Each one ends working, tested and committed. **Only V5 needs the mic.**
 - **Done when:** two accounts share one speaker, and `POST /devices/:uid/family/:memberId/call` (used later by voice) shows a push on that member's phone, even with the app closed.
 - **Web push (added):** the web app registers a service worker with Firebase (`public/firebase-messaging-sw.js`) and a **Turn on notifications** button; calls and visitor rings reach a closed page, and tapping one opens the speaker. An iPhone needs the site on the Home Screen (iOS 16.4+), so the app has a manifest and icons. While the page is open a toast with **Answer** shows instead. Notifications expire after 5 minutes.
 
-### V3 The voice brain, tested with the phone mic
+### V3 The voice brain, with the speaker's own mic  🟡 *built 2026-10-15: firmware 0.20.0 (records until the person is quiet), backend Voice module (Gemini `gemini-3.5-flash-lite` understands, `gemini-3.8-flash-lite-tts` speaks Bangla; 50 e2e + 8 unit tests), web Voice section; live test with a Gemini key pending*
+- **Changed from the plan:** the mic arrived first, so V3 uses the speaker's mic (an **Ask** button on the web page makes it listen until the wake word exists), and one Gemini key does both understanding and speaking (no Azure). The backend, not the AI, works out the date and builds the sentence that is read back, so what's read back is what's saved.
 - **Backend `VoiceModule`:**
   - `Understand` adapter → **Gemini Flash-Lite** (free tier; the key is in `.env`). The prompt has the allowed intents, the family `callName`s, the current time in the speaker's time zone, and "answer in short Bangla, never give medical advice".
   - `Speak` adapter → **Azure `bn-BD-NabanitaNeural`** (free tier). Short replies are cached by their text.

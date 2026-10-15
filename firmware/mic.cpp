@@ -7,10 +7,13 @@
 static const size_t PIECE = SAMPLE_RATE / 8;  // 125 ms per MQTT message: 8 a second
 static const size_t BLOCK = 256;              // frames per I2S read (16 ms)
 
+static const uint32_t WINDOW = SAMPLE_RATE / 20;  // 50 ms: the step for telling speech from quiet
+
 static TaskHandle_t task = nullptr;
 static volatile bool running = false;
 static volatile bool stopAsked = false;
 static int seconds = 5;
+static int endSilenceMs = 0;  // 0: record the whole time
 
 // The mic answers in one slot of each stereo frame (which one, its L/R pin
 // decides): both are read, and the louder one is kept
@@ -55,9 +58,15 @@ static void micTask(void *) {
   int64_t levelSum = 0;
   int32_t levelPeak = 0;
   uint32_t levelCount = 0;
-  char json[160];
+  // Speech or quiet, per 50 ms window, against the room's own background (the
+  // first 300 ms set it, quiet moments keep it current): speech is 9 dB above it
+  int64_t windowSum = 0;
+  uint32_t windowCount = 0, windows = 0, loudRun = 0, quietMs = 0;
+  float background = 0;
+  bool heard = false, silenceEnded = false;
+  char json[200];
 
-  while (!stopAsked && total < want) {
+  while (!stopAsked && !silenceEnded && total < want) {
     size_t got = 0;
     if (i2s_read(MIC_PORT, frames, sizeof(frames), &got, pdMS_TO_TICKS(100)) != ESP_OK || !got) continue;
     size_t n = got / 8;
@@ -68,7 +77,7 @@ static void micTask(void *) {
     if (energyR > 2 * energyL) right = true;
     else if (energyL > 2 * energyR) right = false;
 
-    for (size_t i = 0; i < n && total < want; i++) {
+    for (size_t i = 0; i < n && total < want && !silenceEnded; i++) {
       int32_t x = frames[2 * i + (right ? 1 : 0)] >> 8;  // the mic's 24-bit sample
       if (first) { dc = x << 4; first = false; }
       dc += ((x << 4) - dc) >> 10;  // ~2.5 Hz: follows the offset, not the voice
@@ -83,6 +92,23 @@ static void micTask(void *) {
       levelSum += (int64_t)y * y;
       levelPeak = max(levelPeak, abs(y));
       levelCount++;
+      windowSum += (int64_t)y * y;
+
+      if (++windowCount == WINDOW) {
+        float power = (float)windowSum / WINDOW;
+        windowSum = windowCount = 0;
+        if (windows++ < 6) background += power / 6;  // the first 300 ms
+        else {
+          bool loud = power > background * 8 && power > 3400;  // +9 dB, and above -55 dB
+          loudRun = loud ? loudRun + 1 : 0;
+          if (loudRun >= 3) heard = true;  // 150 ms of it: someone is speaking
+          if (power < background * 4) {
+            if (heard) quietMs += 50;
+            background = background * 0.95f + power * 0.05f;  // follow the room
+          } else quietMs = 0;
+          if (endSilenceMs && heard && quietMs >= (uint32_t)endSilenceMs) silenceEnded = true;
+        }
+      }
 
       if (fill == PIECE) {
         if (netSendMic((const uint8_t *)piece, sizeof(piece))) pieces++;
@@ -103,10 +129,12 @@ static void micTask(void *) {
     else dropped++;
   }
   i2s_driver_uninstall(MIC_PORT);
+  const char *endedBy = stopAsked ? "stop" : silenceEnded ? "silence" : "time";
   snprintf(json, sizeof(json),
-           "{\"type\":\"mic_done\",\"samples\":%lu,\"pieces\":%lu,\"dropped\":%lu,\"clipped\":%lu,\"slot\":\"%s\",\"gainShift\":%d}",
+           "{\"type\":\"mic_done\",\"samples\":%lu,\"pieces\":%lu,\"dropped\":%lu,\"clipped\":%lu,"
+           "\"slot\":\"%s\",\"gainShift\":%d,\"speech\":%s,\"endedBy\":\"%s\"}",
            (unsigned long)total, (unsigned long)pieces, (unsigned long)dropped, (unsigned long)clipped,
-           right ? "right" : "left", MIC_GAIN_SHIFT);
+           right ? "right" : "left", MIC_GAIN_SHIFT, heard ? "true" : "false", endedBy);
   netSend(json);
   Serial.printf("Microphone off: %lu samples, %lu clipped, %s slot, gain shift %d\n", (unsigned long)total,
                 (unsigned long)clipped, right ? "right" : "left", MIC_GAIN_SHIFT);
@@ -115,9 +143,10 @@ static void micTask(void *) {
   vTaskDelete(nullptr);
 }
 
-bool micTest(int s) {
+bool micRecord(int s, int endSilence) {
   if (running) return false;  // one recording at a time
   seconds = constrain(s, 1, MIC_TEST_MAX_S);
+  endSilenceMs = constrain(endSilence, 0, 5000);
   toneStop();  // a quiet room: the speaker doesn't play while it listens
   talkStop();
   if (!portStart()) {
@@ -126,7 +155,7 @@ bool micTest(int s) {
   }
   stopAsked = false;
   running = true;
-  Serial.printf("Microphone on: recording %d s\n", seconds);
+  Serial.printf("Microphone on: up to %d s%s\n", seconds, endSilenceMs ? ", until the room is quiet again" : "");
   // Its own task, so a busy main loop doesn't lose audio; core 1, like the loop (Wi-Fi is on core 0)
   xTaskCreatePinnedToCore(micTask, "mic", 6144, nullptr, 3, &task, 1);
   return true;

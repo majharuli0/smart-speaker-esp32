@@ -58,13 +58,24 @@ static void micTask(void *) {
   int64_t levelSum = 0;
   int32_t levelPeak = 0;
   uint32_t levelCount = 0;
-  // Speech or quiet, per 50 ms window, against the room's own background (the
-  // first 300 ms set it, quiet moments keep it current): speech is 9 dB above it
+  // Speech or quiet, per 50 ms window, against the room's background: the quietest
+  // recent window (it drops at once to a quieter one and rises ~2 dB a second), so
+  // someone talking from the very start isn't taken for the background. Speech is
+  // 12 dB above it; quiet is under 8 dB above it (on the prototype the background
+  // wanders 0-8 dB above its floor, and speech is 15-34 dB above).
   int64_t windowSum = 0;
-  uint32_t windowCount = 0, windows = 0, loudRun = 0, quietMs = 0;
-  float background = 0;
+  uint32_t windowCount = 0, loudRun = 0, quietMs = 0;
+  float floor = -1;
   bool heard = false, silenceEnded = false;
-  char json[200];
+  char json[240];
+
+  if (endSilenceMs) vTaskDelay(pdMS_TO_TICKS(400));  // a voice request: the cue plays out first
+  if (!portStart()) {
+    netSend("{\"type\":\"mic_done\",\"error\":\"the microphone's I2S port didn't start\"}");
+    running = false;
+    task = nullptr;
+    vTaskDelete(nullptr);
+  }
 
   while (!stopAsked && !silenceEnded && total < want) {
     size_t got = 0;
@@ -97,17 +108,14 @@ static void micTask(void *) {
       if (++windowCount == WINDOW) {
         float power = (float)windowSum / WINDOW;
         windowSum = windowCount = 0;
-        if (windows++ < 6) background += power / 6;  // the first 300 ms
-        else {
-          bool loud = power > background * 8 && power > 3400;  // +9 dB, and above -55 dB
-          loudRun = loud ? loudRun + 1 : 0;
-          if (loudRun >= 3) heard = true;  // 150 ms of it: someone is speaking
-          if (power < background * 4) {
-            if (heard) quietMs += 50;
-            background = background * 0.95f + power * 0.05f;  // follow the room
-          } else quietMs = 0;
-          if (endSilenceMs && heard && quietMs >= (uint32_t)endSilenceMs) silenceEnded = true;
-        }
+        floor = floor < 0 || power < floor ? power : floor * 1.023f;
+        bool loud = power > floor * 16 && power > 1100;  // +12 dB, and above -60 dB
+        loudRun = loud ? loudRun + 1 : 0;
+        if (loudRun >= 2) heard = true;  // 100 ms of it: someone is speaking
+        if (power < floor * 6.3f) {  // under +8 dB
+          if (heard) quietMs += 50;
+        } else quietMs = 0;
+        if (endSilenceMs && heard && quietMs >= (uint32_t)endSilenceMs) silenceEnded = true;
       }
 
       if (fill == PIECE) {
@@ -132,9 +140,10 @@ static void micTask(void *) {
   const char *endedBy = stopAsked ? "stop" : silenceEnded ? "silence" : "time";
   snprintf(json, sizeof(json),
            "{\"type\":\"mic_done\",\"samples\":%lu,\"pieces\":%lu,\"dropped\":%lu,\"clipped\":%lu,"
-           "\"slot\":\"%s\",\"gainShift\":%d,\"speech\":%s,\"endedBy\":\"%s\"}",
+           "\"slot\":\"%s\",\"gainShift\":%d,\"speech\":%s,\"endedBy\":\"%s\",\"floorDb\":%.1f}",
            (unsigned long)total, (unsigned long)pieces, (unsigned long)dropped, (unsigned long)clipped,
-           right ? "right" : "left", MIC_GAIN_SHIFT, heard ? "true" : "false", endedBy);
+           right ? "right" : "left", MIC_GAIN_SHIFT, heard ? "true" : "false", endedBy,
+           floor > 0 ? 10 * log10f(floor / (32768.0f * 32768.0f)) : -120.0f);
   netSend(json);
   Serial.printf("Microphone off: %lu samples, %lu clipped, %s slot, gain shift %d\n", (unsigned long)total,
                 (unsigned long)clipped, right ? "right" : "left", MIC_GAIN_SHIFT);
@@ -149,10 +158,7 @@ bool micRecord(int s, int endSilence) {
   endSilenceMs = constrain(endSilence, 0, 5000);
   toneStop();  // a quiet room: the speaker doesn't play while it listens
   talkStop();
-  if (!portStart()) {
-    netSend("{\"type\":\"mic_done\",\"error\":\"the microphone's I2S port didn't start\"}");
-    return false;
-  }
+  if (endSilenceMs) cueStart();  // a voice request: "I'm listening" (the task waits for it)
   stopAsked = false;
   running = true;
   Serial.printf("Microphone on: up to %d s%s\n", seconds, endSilenceMs ? ", until the room is quiet again" : "");

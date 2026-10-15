@@ -23,6 +23,9 @@ void toneStop();
 // Doorbell: a built-in ding-dong, played once (skipped if an alarm or talk is playing)
 void chimeStart();
 
+// "I'm listening": two short rising notes, before the mic opens for a voice request
+void cueStart();
+
 // Live talk from the browser (16 kHz 16-bit mono PCM)
 void talkStart();
 void talkPush(const uint8_t *data, size_t length);

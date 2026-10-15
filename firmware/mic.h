@@ -4,9 +4,10 @@
 // its level (mic_level, every 250 ms), then mic_done. The status light shows it's on.
 #pragma once
 
-// Records up to `seconds`. With endSilenceMs, it ends by itself once someone has
-// spoken and then been quiet that long (a voice request). false if a recording is
-// already on, or the mic's port didn't start.
+// Records up to `seconds`. With endSilenceMs it's a voice request: a short cue
+// says it's listening, and it ends by itself once someone has spoken and then been
+// quiet that long. false if a recording is already on (a port that won't start is
+// reported in mic_done).
 bool micRecord(int seconds, int endSilenceMs);
 void micStop();  // end it early (mic_done still follows)
 bool micBusy();  // recording now

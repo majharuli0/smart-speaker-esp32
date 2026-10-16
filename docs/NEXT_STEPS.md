@@ -1,8 +1,8 @@
-# Next steps: handoff and plan (written 2026-10-16, updated after steps 0, 1 and blocks B1, B3)
+# Next steps: handoff and plan (written 2026-10-16, updated 2026-10-17 after steps 0, 1 and blocks B1, B3, B2)
 
 Read this file first in a new chat. It covers what is live, how we work, what we measured, and what to do next, in order.
 
-**To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 2, block B2."*
+**To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 2, block B5."* (B5 = the context Momo and routines know: date, weather, prayer times, next alarms. Then B4, then step 3.)
 
 ---
 
@@ -20,7 +20,7 @@ Everything in the table is **pushed to git and deployed on the cloud** (smart-sp
 **Since then (2026-10-16): steps 0 and 1 done and tested on the speaker, local only.** Everything is **committed on `main` but not pushed and not deployed**:
 - Backend `47e648a` (step 0, calling fix) and `667276f` (step 1, a new audio link closes the old one). **68 e2e tests pass.**
 - Firmware **0.30.2** (`led-demo` `3188aa8`): no freeze after uploads, more open files allowed, failed audio-link retries are logged. Plus doc commits after it.
-- **B1, B3 (2026-10-16) and B2 (2026-10-17) are built and committed locally too:** (B2: see "B2 progress") backend `ca00b9e` (**77 e2e tests pass**), web `5f6cbd2`, app `a9fb736` (new migrations `notify_settings` and `alarm_label`). Not pushed, not deployed, **not yet tested on the real speaker** (the owner tests in a batch later). See "B1 progress" and "B3 progress" in step 2.
+- **B1, B3 (2026-10-16) and B2 (2026-10-17) are built and committed locally too:** (B2: see "B2 progress") backend `ca00b9e` (B1+B3) and `9fbc4c1` (B2) (**86 e2e tests pass**), web `5f6cbd2` (B1+B3) and `8ed3d48` (B2 Routines section), app `a9fb736` (new migrations `notify_settings` and `alarm_label`). Not pushed, not deployed, **not yet tested on the real speaker** (the owner tests in a batch later). See "B1 progress" and "B3 progress" in step 2.
 - **Pending tests for the owner (local, on the speaker/phone):** (1) unplug the speaker → an "offline" push after 10 min, "back online" after; set `NOTIFY_OFFLINE_MINUTES=2` in `.env` to see it sooner; (2) Momo: list/change/delete alarms, volume, play a sound by name, delete a sound file, reminder with a reason ("কীসের জন্য?"); (3) web "Say something on the speaker now"; (4) the app needs a **new build** to show the labels and server-side notify settings.
 - **Open decisions (owner postponed):** missed-alarm alerts (needs the physical stop button, or B2's ask-and-expect); quiet hours for alerts; whether a label should be required in the apps.
 - **False wakes (found 2026-10-16):** in 24 h the wake word opened **79 Momo sessions, about 48 pure false wakes** (TV, other talk, a meeting), each streaming the room's audio to Gemini (cost is small; **privacy is the real issue**: the free tier lets Google use requests). The AI's second check catches most (`not_for_me`), not all. Done: Momo's instructions are stricter (silent unless the first words are clearly the wake phrase) and she no longer volunteers alarms. **Owner decided: leave it for step 5 (the neural wake word).** Until then: untick "Listen for it" on the web Wake word page before meetings, or lower the sensitivity. Optional small fixes if it gets annoying: a "pause wake word for 1 h" button, and automatic backoff after 3 rejected wakes in 10 min.
@@ -65,6 +65,7 @@ Everything in the table is **pushed to git and deployed on the cloud** (smart-sp
 4. **Secrets:** never print the Gemini key. `secrets.h`, `.env` and the Firebase key stay git-ignored.
 5. **Serial log:** COM11 at 115200. Stop any log capture before flashing (the port is busy otherwise).
 6. **Firmware edits:** use the Edit tool for C strings. Python heredocs in Git Bash turned `\n` into real line breaks several times.
+7. **Web first (owner, 2026-10-17):** every new feature ships with a web UI in the same piece of work, so the owner can test by clicking, not with Swagger or curl. The phone app comes after. Regenerate the web client with `npm run api`.
 
 ---
 
@@ -242,14 +243,15 @@ The owner's rule: use cases must be **dynamic**, so new ones take little effort.
 - **Not done in B3:** `announce` to several speakers (skipped by scope), `send_message` at a time (use an alarm with a recorded message), reminder "tone/song by name" on `set_reminder`, stop/snooze by voice (skipped).
 - **Open question:** `set_volume` reads the speaker's last reported volume (0-100); if the speaker hasn't reported one it assumes 50. The firmware's real volume scale hasn't been checked on the speaker.
 
-**B2 progress (2026-10-17): smallest useful version built, e2e-tested, committed locally (backend). Not pushed, not deployed, not yet tested on the real speaker.**
+**B2 progress (2026-10-17): smallest useful version built, e2e-tested, with a web UI, committed locally (backend `9fbc4c1`, web `8ed3d48`). Not pushed, not deployed, not yet tested on the real speaker.**
 - **What it does:** a *routine* is a time + repeat days (empty = every day) + `say` (Momo says a sentence) or `ask` (Momo asks it and listens). `expect`: `yes` (they did it) or `any` (any answer counts). No answer or "not yet" → ask again after `retryMinutes`, `retries` more times, then a push to the family (`alertFamily`). Every go is a `RoutineRun`; `GET /devices/:id/routines/runs` is the caregiver log.
-- **API:** `devices/:id/routines` (list, create, PATCH, DELETE; any family member), `POST …/:routineId/run` ("try it now": a manual run, 409 if it's still going), `GET …/runs`. No web or app page yet (step 3).
+- **API:** `devices/:id/routines` (list, create, PATCH, DELETE; any family member), `POST …/:routineId/run` ("try it now": a manual run, 409 if it's still going), `GET …/runs`. **Web:** a "Routines" section on the device page under Alarms (`src/pages/device/Routines.tsx`): add (ask/say, time, days, wants yes or any answer, tries, minutes apart, tell the family), switch on/off, delete, **▶ Run now**, and a "What happened" log that refreshes every 5 s. Plus a "A routine got no answer" toggle in Notify me. **No edit-in-place** (delete and add again). **No app screen yet** (web first, see rule 7).
 - **Code:** `src/routines/` (service with a 30 s tick, `ROUTINE_TICK_SECONDS=0` turns the timer off in tests, which call `tick(at)` and `idle()`); `VoiceService.ask(…, 'routine', {question, expect})` says the question, then opens the conversation with a `routine_answer(ok, note)` tool; `VoiceService.announce` for `say`. New push kind `routines` (default on) in `NotifySetting` / `GET|PATCH /notify`. New tables `Routine`, `RoutineRun` (migration `routines`). Voice log gets triggers/results `routine`, `said`, `routine_answered`.
 - **Rules:** a routine runs only within 5 min after its time (a late server doesn't fire hours later) and once per day (manual runs don't count). The speaker busy in a conversation or a mic test → looked at again after 1 min, no try used, skipped after 30 min. Speaker offline → run `offline`, no alert (B1 already alerts). A server restart marks a run that was talking `failed`.
 - **Tests:** `test/routines.e2e-spec.ts` (9 cases); **86 e2e tests pass** in total.
 - **Not in B2 (later):** yearly dates, prayer times, event triggers (alarm fired, no call for N days), Momo `routine_*` voice tools, playing a recorded sound, quiet hours. Check with the owner before adding any.
-- **Pending test for the owner (local):** create a routine with curl/Swagger (no page yet), `POST …/run`, answer the speaker; leave one unanswered to see the retry and the push. **Local setup note:** `prisma generate` couldn't replace the engine DLL while the dev server ran; the migration is applied and the types are generated, so just restart `npm run start:dev`.
+- **Pending test for the owner (local):** open the speaker's page → **Routines** → add an "Asks and listens" routine (e.g. `ওষুধ খেয়েছেন?`, 2 tries, 1 min apart), **▶ Run now**, answer "yes"; run it again and stay silent to see "asking again soon", then "no answer · family told" and the push. Also try "Just says". Claude only type-checked it and checked that Vite serves it; nobody has clicked through it in a browser yet.
+- **Local setup:** the backend was restarted after the migration and `prisma generate` (the engine DLL is locked while the dev server runs: stop it first if `prisma generate` says EPERM). **The dev server was started from Claude's session and may be stopped now: start it with `npm run start:dev` in `smart-speaker-backend`, and the web with `npm run dev -- --host` in `smart-speaker-web`.** After backend API changes, run `npm run api` in the web project (the backend must be running).
 
 **Next: B5, then B4, step 3.** (B2 notes, kept: B1's `NotifyService` (`src/notify/`) is the "tell the family" part; B3's Momo tools and alarm helpers are in `src/voice/voice.service.ts` (`act`, `alarmsNow`, `planFrom`/`newWhen`, `findSound`). A routine that "asks and listens" needs the server to start a conversation (`VoiceService.ask` today needs an owner id and the speaker to be free: `busy`). Keep it to the smallest useful version (one table, one scheduler, a run log) and check with the owner before adding more.)
 
@@ -278,7 +280,7 @@ The owner's rule: use cases must be **dynamic**, so new ones take little effort.
 - **Quiet hours: not part of B1.** The app's "Quiet hours" setting is about a silent doorbell at night, is still phone-only, and does nothing.
 
 ### Step 3: Templates in the apps
-- A **"Care routines"** page (web first, then app) lists ready-made templates: Medicine check, Drink water, Morning greeting, Prayer times, Daily check-in, Birthday greetings, Call family nudge.
+- A **"Care routines"** page (web first, then app) replaces the plain Routines box that B2 already put on the device page. It lists ready-made templates: Medicine check, Drink water, Morning greeting, Prayer times, Daily check-in, Birthday greetings, Call family nudge.
 - Each has a few plain settings (times, who to alert, the sentence) and an on/off switch.
 - Templates are data (JSON in the backend), so a new use case is a new template, not new code.
 - The caregiver view shows today's routine runs: answered, missed, alerted.

@@ -37,6 +37,7 @@ Everything in the table is **pushed to git and deployed on the cloud** (smart-sp
 - Echo cancellation runs in **FD low-cost mode** in PSRAM. It's created once at boot.
 - **Scope cut (2026-10-16): the owner has exams and other work, so these are skipped for now:** #6 emergency help button, #30 multi-speaker help request, #18 smart home, #26 news briefing, #24 announcements across rooms, #7 offline commands (**step 4 is postponed**). #8 was already skipped. Don't build them unless the owner brings them back. Keep each piece of work small, and check with the owner before starting a feature.
 - The delay on live audio (about 1 s speaker → phone) is **acceptable to the owner**: leave the buffers as they are.
+- **Stopping or snoozing a ringing alarm by voice: skipped.** The speaker ignores the mic while it makes sound, so it would need the alarm to ring in bursts and listen for the wake word in the gaps. Too much complexity for now. **Later the owner plans physical buttons:** stop/snooze, emergency help, and start the voice assistant. Until then, alarms stop from the app/web, or by themselves after 60 s.
 
 **Not committed (leave alone):** `led-demo/hardware/kicad/`. The owner said the KiCad schematic isn't needed.
 

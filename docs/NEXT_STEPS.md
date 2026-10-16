@@ -26,6 +26,8 @@ Everything in the table is **pushed to git and deployed on the cloud** (smart-sp
 **Decided and closed:**
 - **Interrupting Momo by voice (barge-in): not wanted.** It was built and tried, then switched off (`BARGE_IN 0` in `firmware/config.h`). Momo stopped on her own echo and on room noise. Don't bring it back, not even by wake word, unless the owner asks.
 - Echo cancellation runs in **FD low-cost mode** in PSRAM. It's created once at boot.
+- **Scope cut (2026-10-16): the owner has exams and other work, so these are skipped for now:** #6 emergency help button, #30 multi-speaker help request, #18 smart home, #26 news briefing, #24 announcements across rooms, #7 offline commands (**step 4 is postponed**). #8 was already skipped. Don't build them unless the owner brings them back. Keep each piece of work small, and check with the owner before starting a feature.
+- The delay on live audio (about 1 s speaker → phone) is **acceptable to the owner**: leave the buffers as they are.
 
 **Not committed (leave alone):** `led-demo/hardware/kicad/`. The owner said the KiCad schematic isn't needed.
 
@@ -221,7 +223,8 @@ The owner's rule: use cases must be **dynamic**, so new ones take little effort.
 - Templates are data (JSON in the backend), so a new use case is a new template, not new code.
 - The caregiver view shows today's routine runs: answered, missed, alerted.
 
-### Step 4: Offline basic commands (the owner insisted on this)
+### Step 4: Offline basic commands: ⏸ postponed (owner, 2026-10-16)
+Skipped for now because of the scope cut in section 1. The plan below stays for later.
 Some things must work **without internet**. After "হাই মোমো", if the cloud can't be reached, the speaker handles a few common commands itself.
 
 - **Commands:**

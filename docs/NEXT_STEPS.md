@@ -135,7 +135,7 @@ These are the cheapest real improvements. Each comes early in the building block
 ### Step 1: Stability check on the cloud (small)
 Three loose ends from the deploy. One test session with the owner covers all three.
 
-**Progress 2026-10-16 (code side, local only, not committed):**
+**Progress 2026-10-16: committed, not pushed, not deployed** (firmware 0.30.2 `led-demo` `3188aa8`, backend `667276f`, on top of step 0's `47e648a`). The cloud upload happens once, together with step 0:
 - **Found: the speaker "froze" (watchdog restart) about 12 s after nearly every upload**, from 0.27 to 0.30.1. The boot events in the local database show it: `usb_reset`, then `froze` (task `IDLE1`, pc `0x40380107` = core 1 idle). Cause: with USB plugged into the PC and no serial monitor reading, the core's USB serial (`HWCDC`) waits up to 2 s per print (core messages 100 ms per character), so a few prints in one `loop()` pass trip the 5 s loop watchdog. After `power_on` it didn't happen. **Fix (firmware 0.30.2):** `Serial.setTxTimeoutMs(1)` in `setup()`. Flashed twice with no monitor open: no freeze.
 - **The 16:29:56 offline/online on 2026-10-16 was that freeze**, not Wi-Fi. The "audio link down" at 16:30:01 was the *old* link (the dead one from before the restart) being found by the server's 20 s ping. The new link stayed up, so the link *did* come back. The backend now closes an old link as soon as a new one from the same speaker logs in, and logs "old audio link closed (a new one replaced it)". New e2e case in `audio-link.e2e-spec.ts` (**68 e2e tests pass**).
 - The firmware now logs a failed audio-link attempt ("couldn't connect", "the server didn't accept the login"): the first one, then about once a minute. Before, failed retries were silent.

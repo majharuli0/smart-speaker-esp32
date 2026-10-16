@@ -1,8 +1,8 @@
-# Next steps: handoff and plan (written 2026-10-16, updated after steps 0 and 1)
+# Next steps: handoff and plan (written 2026-10-16, updated after steps 0, 1 and blocks B1, B3)
 
 Read this file first in a new chat. It covers what is live, how we work, what we measured, and what to do next, in order.
 
-**To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 2, block B1."*
+**To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 2, block B2."*
 
 ---
 
@@ -20,6 +20,10 @@ Everything in the table is **pushed to git and deployed on the cloud** (smart-sp
 **Since then (2026-10-16): steps 0 and 1 done and tested on the speaker, local only.** Everything is **committed on `main` but not pushed and not deployed**:
 - Backend `47e648a` (step 0, calling fix) and `667276f` (step 1, a new audio link closes the old one). **68 e2e tests pass.**
 - Firmware **0.30.2** (`led-demo` `3188aa8`): no freeze after uploads, more open files allowed, failed audio-link retries are logged. Plus doc commits after it.
+- **B1 and B3 (step 2) are built and committed locally too, 2026-10-16:** backend `ca00b9e` (**77 e2e tests pass**), web `5f6cbd2`, app `a9fb736` (new migrations `notify_settings` and `alarm_label`). Not pushed, not deployed, **not yet tested on the real speaker** (the owner tests in a batch later). See "B1 progress" and "B3 progress" in step 2.
+- **Pending tests for the owner (local, on the speaker/phone):** (1) unplug the speaker → an "offline" push after 10 min, "back online" after; set `NOTIFY_OFFLINE_MINUTES=2` in `.env` to see it sooner; (2) Momo: list/change/delete alarms, volume, play a sound by name, delete a sound file, reminder with a reason ("কীসের জন্য?"); (3) web "Say something on the speaker now"; (4) the app needs a **new build** to show the labels and server-side notify settings.
+- **Open decisions (owner postponed):** missed-alarm alerts (needs the physical stop button, or B2's ask-and-expect); quiet hours for alerts; whether a label should be required in the apps.
+- **False wakes (found 2026-10-16):** in 24 h the wake word opened **79 Momo sessions, about 48 pure false wakes** (TV, other talk, a meeting), each streaming the room's audio to Gemini (cost is small; **privacy is the real issue**: the free tier lets Google use requests). The AI's second check catches most (`not_for_me`), not all. Done: Momo's instructions are stricter (silent unless the first words are clearly the wake phrase) and she no longer volunteers alarms. **Owner decided: leave it for step 5 (the neural wake word).** Until then: untick "Listen for it" on the web Wake word page before meetings, or lower the sensitivity. Optional small fixes if it gets annoying: a "pause wake word for 1 h" button, and automatic backoff after 3 rejected wakes in 10 min.
 - **The owner wants a single cloud upload later**, not one per step. When they say "deploy", follow section 2, rule 3:
   - push both repos, back up the server, update the backend;
   - switch `secrets.h` to `mqtts://smart-speaker.duckdns.org:8883` and reflash;
@@ -226,17 +230,43 @@ The owner's rule: use cases must be **dynamic**, so new ones take little effort.
 | Stories and poetry | a Momo "story mode" (longer answers when asked; instructions only) |
 | ~~Emergency help~~ | ⏸ skipped for now (scope cut). Later: B1 (urgent) + a trigger: voice ("বাঁচাও" / "সাহায্য"), then a hardware button |
 
+**B3 progress (2026-10-16): built, e2e-tested, committed locally (backend `ca00b9e`, web `5f6cbd2`, app `a9fb736`). Waiting for the owner's local test on the speaker.**
+- **Alarm label:** new `Alarm.label` column (migration `alarm_label`), set from web and app (a "For" field, shown on the list and cards). Momo's reminders save it.
+- **Momo knows the speaker:** at the start of each conversation her instructions list the speaker's name, volume and every alarm (number, kind, what for, when, on/off).
+- **New Momo tools:** `list_alarms`, `change_alarm` (time/day/on-off, by number n), `delete_alarm`, `set_volume` (louder/quieter by 20, or level 1-10), `play_sound` (a tone, song or file by name; it starts when the conversation ends, because the speaker can't play while it listens). New voice results `alarm_changed`, `alarm_deleted`, `played`.
+- **Reminder sounds are named after what they say** (`/Reminders/প্রেসারের ওষুধ.wav`, not a timestamp). The same reminder again reuses the file (no new AI speech); users delete unwanted ones in the file manager (built-in storage, /Reminders). Deleting an alarm does **not** delete its sound file.
+- **Voice message "send now":** `POST /devices/:id/files/message` (a recording; plays at once after a short chime, not stored). Web: "Say something on the speaker now" under Alarms. **Not in the app yet** (needs an audio-recording package; the app already records for alarms, so reuse that later).
+- **Deleting by voice (fixed after the owner's test):** Momo said she'd deleted a reminder sound or tone but hadn't: `delete_alarm` only removes the alarm. Now `delete_alarm` tells her the sound file stays (or removes it too with `with_sound`, if no other alarm uses it), and a new `delete_sound` tool deletes a file on the speaker by name (alarms that played it switch off). Her instructions say never to claim a deletion the tool didn't confirm. Tones from the server's library (built-in tones) aren't files on the speaker and can't be deleted by voice.
+- **Reasons on alarms:** Momo now asks "কীসের জন্য?" when no reason is given and saves it as the label. A label is still optional in the apps.
+- **Test note:** the first e2e run after any code change often fails some suites in setup (cold ts-jest compile is slow); run again.
+- **Not done in B3:** `announce` to several speakers (skipped by scope), `send_message` at a time (use an alarm with a recorded message), reminder "tone/song by name" on `set_reminder`, stop/snooze by voice (skipped).
+- **Open question:** `set_volume` reads the speaker's last reported volume (0-100); if the speaker hasn't reported one it assumes 50. The firmware's real volume scale hasn't been checked on the speaker.
+
+**Next: B2 (routines), then B5, B4, step 3.** Starting notes for B2: B1's `NotifyService` (`src/notify/`) is the "tell the family" part; B3's Momo tools and alarm helpers are in `src/voice/voice.service.ts` (`act`, `alarmsNow`, `planFrom`/`newWhen`, `findSound`). A routine that "asks and listens" needs the server to start a conversation (`VoiceService.ask` today needs an owner id and the speaker to be free: `busy`). Keep it to the smallest useful version (one table, one scheduler, a run log) and check with the owner before adding more.
+
 **Order:** B1 → B3 → B2 → B5 → B4. B1 and B3 are small and useful on their own; B2 needs both. Each block gets backend e2e tests (fake AI and fake speaker, as in `test/voice.e2e-spec.ts`) and a local test with the owner before the cloud.
 
 **Time and scope (agreed 2026-10-16):** the owner has exams and other work, so keep each block to its smallest useful version. The owner told their supervisor **about 1 week** for steps 2 and 3, with first results in 2–3 days (B1 alerts and B3 voice tools: list, change and delete reminders by voice, voice messages). Rough split: B1 + B3 about 2 days, B2 + B5 2–3 days, B4 1 day, the Care routines page 1–2 days. Check with the owner before adding anything beyond that.
 
 **Where the use cases stand:** 23 are in scope (29 minus the six skipped). Today 3 work ✅, 13 partly 🟡, 7 are not built ❌: about 40%. The supervisor was told this on 2026-10-16.
 
-**Start of B1, for the next chat:**
+**B1 plan (kept for reference; built, see "B1 progress"):**
 - **Settings on the server:** a per-member table (e.g. `NotifySetting`: userId, deviceId, offline, restarted, missedAlarm, quiet hours). It replaces the phone-only toggles in `smart-speaker-app/app/(tabs)/account.tsx:53-73`, and an API lets web and app read and change it.
 - **Events:** speaker offline for N minutes (with a timer, so a short blip or a restart doesn't alert); a `boot` with reason `froze`/`crash`/`brownout`; an alarm that rang with nobody stopping it. Note: the speaker sends `alarm_fired`, then `stopped`. It stops by itself after `RING_MAX_MS` (60 s) and sends the **same** `stopped` as when a person stops it. So "missed" needs a small firmware change: `stopped` with a reason (`timeout` vs `user`). The app's toggles are "Missed alarms", "Speaker offline (after 10 minutes)" and "Speaker restarted".
 - **Sending:** through `PushService` to the members who turned it on, with no repeats within a time window.
 - **Tests:** an e2e test per event with the fake speaker; then a local test with the owner (unplug the speaker → a push on the phone after N minutes).
+
+**B1 progress (2026-10-16): built, committed locally (same commits as B3). Waiting for the owner's local test.**
+- **Backend:** new `NotifySetting` table (migration `notify_settings`) and `src/notify/` (`NotifyService`, `GET / PATCH /api/v1/notify`). Settings are **per person, for all their speakers** (like the app's Account toggles), not per speaker. Defaults: doorbell on, offline on, restarted off.
+  - **Offline:** an alert after `NOTIFY_OFFLINE_MINUTES` (10) offline, then "back online" to the same people. A restart or a Wi-Fi blip comes back first, so it isn't alerted. The timers live in memory: a server restart forgets a speaker that's already offline.
+  - **Restarted:** a boot with reason `froze`, `crash` or `brownout`. Not `power_on`, `restart`, `usb_reset`.
+  - **Doorbell:** the visitor push now goes only to members with it on. `PushService.toDevice` is gone.
+  - At most one alert of a kind per speaker every 30 min.
+  - `test/notify.e2e-spec.ts`: **72 e2e tests pass** (3 runs in a row). Test files must use their own push tokens: registering a token takes it from every other session, and the test database is shared.
+- **Web:** a "Notify me" box on the Family tab. **App:** the Account toggles now read and change the server settings (the phone-only `notify` pref is gone), and tapping an offline, online or restarted push opens the speaker. Both API clients regenerated (the app's was well out of date).
+- **Missed alarms: not built, needs the owner's decision.** The speaker has no buttons and voice-stop was skipped, so **every** alarm ends by the 60 s timeout unless someone stops it from the app. "Timed out" can't mean "missed" yet. The app's "Missed alarms" toggle was removed. B2's "ask and expect an answer" (e.g. "ওষুধ খেয়েছেন?" then tell the family) is the real check. Alternatively, wait for the physical stop button.
+- **Owner's call (2026-10-16): the missed-alarm and quiet-hours decisions can wait; local tests come later, in a batch.**
+- **Quiet hours: not part of B1.** The app's "Quiet hours" setting is about a silent doorbell at night, is still phone-only, and does nothing.
 
 ### Step 3: Templates in the apps
 - A **"Care routines"** page (web first, then app) lists ready-made templates: Medicine check, Drink water, Morning greeting, Prayer times, Daily check-in, Birthday greetings, Call family nudge.
@@ -269,7 +299,7 @@ Some things must work **without internet**. After "হাই মোমো", if t
 **Done when:** with the router's internet unplugged, each command works for the owner 9 times out of 10, and online behaviour is unchanged.
 
 ### Step 5: A wake word for the whole family
-Today's matcher recognises best the person who recorded the takes. The elderly parent at the speaker is often someone else.
+Today's matcher recognises best the person who recorded the takes. The elderly parent at the speaker is often someone else. **It also wakes on TV, other talk and meetings (about 48 false wakes in 24 h on 2026-10-16), and each one streams audio to Gemini: a trained neural model that stops these on the device is the real fix for that too. Include a false-wake test with Bangla TV and a spoken meeting.**
 
 - **C0 (quick):** up to 3 people × 3 takes. The score is the closest take of anyone.
   - firmware: `wake.cpp` slots, `wake::TAKES` → 9, about 100 KB of PSRAM;

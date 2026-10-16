@@ -1,8 +1,8 @@
-# Next steps: handoff and plan (written 2026-10-16, updated after step 0)
+# Next steps: handoff and plan (written 2026-10-16, updated after steps 0 and 1)
 
 Read this file first in a new chat. It covers what is live, how we work, what we measured, and what to do next, in order.
 
-**To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 1."*
+**To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 2, block B1."*
 
 ---
 
@@ -17,11 +17,20 @@ Everything in the table is **pushed to git and deployed on the cloud** (smart-sp
 | Web | `smart-speaker-web` `69c5987` | Mic page with **🔊 Echo test** and **🔊 Echo test (AEC)** buttons |
 | Cloud server | `.env` has `AUDIO_LINK_URL=wss://smart-speaker.duckdns.org/api/audio-link` | Backup taken before deploy: `~/backups/speaker-20261015-215804.*` |
 
-**Since then (2026-10-16): step 0 done, local only.**
-- Backend `47e648a` (calling fix, **67 e2e tests pass**): committed, **not pushed, not deployed**. Deploy it with the owner's go-ahead, for example together with step 1.
-- **The speaker is flashed for the local setup** (`secrets.h` → `mqtt://192.168.0.109:1883`). Before the cloud test in step 1, switch it back to `mqtts://smart-speaker.duckdns.org:8883` and reflash.
+**Since then (2026-10-16): steps 0 and 1 done and tested on the speaker, local only.** Everything is **committed on `main` but not pushed and not deployed**:
+- Backend `47e648a` (step 0, calling fix) and `667276f` (step 1, a new audio link closes the old one). **68 e2e tests pass.**
+- Firmware **0.30.2** (`led-demo` `3188aa8`): no freeze after uploads, more open files allowed, failed audio-link retries are logged. Plus doc commits after it.
+- **The owner wants a single cloud upload later**, not one per step. When they say "deploy", follow section 2, rule 3:
+  - push both repos, back up the server, update the backend;
+  - switch `secrets.h` to `mqtts://smart-speaker.duckdns.org:8883` and reflash;
+  - then a cloud check: boot log ("Server online", "Audio link up: wss://…"), a 2-minute 📞 Call, and the RAM line on the device page (with TLS it's lower than the local 79 KB free / lowest 68 KB);
+  - also read the cloud database's boot events around 22:12 UTC on 2026-10-15, to see whether that dropout was the freeze fixed in 0.30.2.
+  The owner must switch Claude Code to "Ask before edits" first: auto mode refuses ssh to the server, both commands and database reads.
+- **The speaker is on 0.30.2 with the local setup** (`secrets.h` → `mqtt://192.168.0.109:1883`). Keep it local while building step 2.
 - The PC's LAN address changed from .103 to **.109**. Check `ipconfig` each time.
 - A stale phone session was deleted from the **local** database only (Kashem's). See "Lessons from step 0".
+- **Serial log without resetting the speaker:** `arduino-cli monitor` captured nothing. Use a PowerShell `System.IO.Ports.SerialPort` reader with `DtrEnable`/`RtsEnable` off that reopens the port when it goes away (it survives unplugging). Don't keep the port open while flashing.
+- **Boot reasons are in the database** (`Event`, `type='boot'`, `data.reason`: `froze`, `crash` with a backtrace, `usb_reset`, `power_on`…). Check them first when the speaker went offline. Decode a backtrace with `xtensa-esp32s3-elf-addr2line -pfiaC -e <the build's .elf>`. The ELF must be from the same build; `./fw.sh build` writes it to `firmware/build/s3/`.
 
 **Decided and closed:**
 - **Interrupting Momo by voice (barge-in): not wanted.** It was built and tried, then switched off (`BARGE_IN 0` in `firmware/config.h`). Momo stopped on her own echo and on room noise. Don't bring it back, not even by wake word, unless the owner asks.
@@ -64,7 +73,8 @@ Everything in the table is **pushed to git and deployed on the cloud** (smart-sp
 | Echo canceller (sweep test) | removes **15–30 dB**. A person's voice over the sound is kept. |
 | Echo canceller cost | **10.1 ms CPU per 32 ms** chunk (FD low-cost; high-perf 13.6 ms). About 142 KB of PSRAM, about 9–13 KB of internal RAM. |
 | Echo delay | stable across reboots: `snap` −9408, `AEC_DELAY_CAL` 1318. The canceller's own output delay is 1024 samples (64 ms). |
-| Internal RAM | tight: about 49 KB free at idle on the local setup. Watch it on every change that touches Wi-Fi or TLS. |
+| Internal RAM | 0.30.2, local setup, after a 10-minute call: **79 KB free, lowest 68 KB** since boot (earlier builds: about 49 KB at idle). The cloud (two TLS sessions) leaves less: measure it after the deploy. Watch it on every change that touches Wi-Fi or TLS. |
+| Hear the room (📞 Call) | 10 min with no samples lost; about 160 KB a minute of Opus over the link |
 
 ---
 
@@ -134,7 +144,7 @@ These are the cheapest real improvements. Each comes early in the building block
 - **Follow-up A (small):** when the phone app switches account, it should log out the old session, so that phone stops getting the old person's calls. Check `smart-speaker-app`'s login and logout flow.
 - **Follow-up B (medium, fits B1):** a delivery receipt. The app tells the server when a call notification arrives, and Momo waits about 5 s before saying "it reached them".
 
-### Step 1: Stability check on the cloud (small)
+### Step 1: Stability check ✅ done locally 2026-10-16 (firmware 0.30.2, backend `667276f`); the cloud check comes with the single deploy
 Three loose ends from the deploy. One test session with the owner covers all three.
 
 **Progress 2026-10-16: committed, not pushed, not deployed** (firmware 0.30.2 `led-demo` `3188aa8`, backend `667276f`, on top of step 0's `47e648a`). The cloud upload happens once, together with step 0:
@@ -209,13 +219,23 @@ The owner's rule: use cases must be **dynamic**, so new ones take little effort.
 | Appointments | B3 label + B2 (date + reminder the day before) |
 | Reminder confirmation and correction | B3 (`list_alarms`, `change_alarm`) |
 | Lost items, daily notes, personal preferences, companionship memory | B4 |
-| Family voice messages, announcements | B3 (`send_message`, `announce`) |
+| Family voice messages | B3 (`send_message`); `announce` to several speakers is skipped for now |
 | Device health alerts, caregiver dashboard | B1 + the B2 run log |
 | Remote caregiver routine management | the apps over B2 and B3 (already partly true for alarms) |
 | Stories and poetry | a Momo "story mode" (longer answers when asked; instructions only) |
-| Emergency help | B1 (urgent) + a trigger: voice ("বাঁচাও" / "সাহায্য") now; a hardware button later |
+| ~~Emergency help~~ | ⏸ skipped for now (scope cut). Later: B1 (urgent) + a trigger: voice ("বাঁচাও" / "সাহায্য"), then a hardware button |
 
 **Order:** B1 → B3 → B2 → B5 → B4. B1 and B3 are small and useful on their own; B2 needs both. Each block gets backend e2e tests (fake AI and fake speaker, as in `test/voice.e2e-spec.ts`) and a local test with the owner before the cloud.
+
+**Time and scope (agreed 2026-10-16):** the owner has exams and other work, so keep each block to its smallest useful version. The owner told their supervisor **about 1 week** for steps 2 and 3, with first results in 2–3 days (B1 alerts and B3 voice tools: list, change and delete reminders by voice, voice messages). Rough split: B1 + B3 about 2 days, B2 + B5 2–3 days, B4 1 day, the Care routines page 1–2 days. Check with the owner before adding anything beyond that.
+
+**Where the use cases stand:** 23 are in scope (29 minus the six skipped). Today 3 work ✅, 13 partly 🟡, 7 are not built ❌: about 40%. The supervisor was told this on 2026-10-16.
+
+**Start of B1, for the next chat:**
+- **Settings on the server:** a per-member table (e.g. `NotifySetting`: userId, deviceId, offline, restarted, missedAlarm, quiet hours). It replaces the phone-only toggles in `smart-speaker-app/app/(tabs)/account.tsx:53-73`, and an API lets web and app read and change it.
+- **Events:** speaker offline for N minutes (with a timer, so a short blip or a restart doesn't alert); a `boot` with reason `froze`/`crash`/`brownout`; an alarm that rang with nobody stopping it. Note: the speaker sends `alarm_fired`, then `stopped`. It stops by itself after `RING_MAX_MS` (60 s) and sends the **same** `stopped` as when a person stops it. So "missed" needs a small firmware change: `stopped` with a reason (`timeout` vs `user`). The app's toggles are "Missed alarms", "Speaker offline (after 10 minutes)" and "Speaker restarted".
+- **Sending:** through `PushService` to the members who turned it on, with no repeats within a time window.
+- **Tests:** an e2e test per event with the fake speaker; then a local test with the owner (unplug the speaker → a push on the phone after N minutes).
 
 ### Step 3: Templates in the apps
 - A **"Care routines"** page (web first, then app) lists ready-made templates: Medicine check, Drink water, Morning greeting, Prayer times, Daily check-in, Birthday greetings, Call family nudge.

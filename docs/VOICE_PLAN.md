@@ -129,7 +129,8 @@ Each one ends working, tested and committed. **Only V5 needs the mic.**
 - **Wake word in two steps:** a loose match on the speaker (sensitivity 5 = 1.35 × the takes' spread: the owner's genuine words scored up to 1.34 ×), then the AI checks the recording starts with the phrase (`wakePhrase`, default “হাই মোমো”); if not, silence.
 - **Fan:** speech is judged in 100-1000 Hz (0.24.0): measured, the fan stayed under 3 dB there while a voice a few metres away reached 15 dB.
 - **No interrupting** the speaker while it talks yet (it would hear itself: needs echo cancellation).
-- **Next: offline commands** (time, day, volume, stop/snooze, next alarm) matched on the speaker from the owner's recordings, answered from sentences stored on it.
+- **Since then (2026-10-16/17, see `NEXT_STEPS.md`):** Momo lists, changes and deletes alarms, sets volume, plays sounds by name (B3); the speaker can start things on its own, a routine that says or asks and tells the family when there's no answer (B2); the family gets push alerts for offline and restarts (B1); and Momo and the routines know the date in Bangla, the weather, prayer times and the next alarm (B5).
+- **Next: Momo remembers** (B4, see `NEXT_STEPS.md`). Offline commands (time, day, volume, stop/snooze, next alarm) are postponed (step 4).
 
 ### V4 Wake word on the speaker  ✅ *done 2026-10-15: firmware 0.22.0, backend wake API (61 e2e tests), web "Wake word" section; with the owner's own 3 takes of “হাই মোমো” it detects well (false wakes per day still to be counted, V6)*
 - **Changed from the plan:** the mic came first, so the 3 takes are recorded on the speaker itself (no phone recordings, no `voice_sync` downloads): the speaker keeps them in its built-in storage. Wake word chosen: **“হাই মোমো”** (any phrase works: it's whatever the takes say).

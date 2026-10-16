@@ -39,7 +39,7 @@ Devices connect to the **MQTT broker**, not to the server. Since firmware 0.13.0
 | `ss/dev/<id>/evt` | device → server | 1 | Everything the device sends: `hello`, 3.6, `boot` |
 | `ss/dev/<id>/online` | device | 1, retained | `1` on connect; the broker publishes `0` if the device drops (last will) |
 | `ss/dev/<id>/mic` | device → server | 0 | Microphone audio (firmware 0.19.0+): 16 kHz 16-bit mono PCM in 125 ms pieces (4,000 bytes), only while a `mic_record` runs. The mic is always on from 0.22.0 (for the wake word), but nothing is sent outside a `mic_record` |
-| `ss/server/online` | server | 1, retained | `1` when up (`0` is its last will). On `1`, a device sends `hello` and its reports again. |
+| `ss/server/online` | server | 1, retained | `1` when up (`0` is its last will). On `1`, a device sends `hello` and its reports again. **Known gap:** the server only counts a device as online after its `hello`. If a device's `hello` arrives while the server's MQTT login is still being refused (a quick restart of the dev server), it is missed, and the device won't say hello again because `ss/server/online` was already `1`. Fix by hand: publish `0`, then `1` (retained) to `ss/server/online`, or restart the backend once more. |
 | `ss/server/http` | server | 1, retained | Base URL for downloads (tones, firmware), e.g. `http://192.168.0.102:3000`; `PUBLIC_URL` overrides it |
 
 - **The device ID is taken from the topic**, never from the message, so a device can't pose as another.

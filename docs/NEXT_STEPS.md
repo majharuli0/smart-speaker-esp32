@@ -2,7 +2,7 @@
 
 Read this file first in a new chat. It covers what is live, how we work, what we measured, and what to do next, in order.
 
-**To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 2, block B4."* (B4 = Momo remembers: notes and preferences per speaker. Then step 3. B5, the context Momo and routines know, is built: see "B5 progress".)
+**To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 2, block B4. Check with me on scope first."* (B4 = Momo remembers: notes and preferences per speaker. Then step 3. B5, the context Momo and routines know, is built: see "B5 progress".)
 
 ---
 
@@ -268,7 +268,17 @@ The owner's rule: use cases must be **dynamic**, so new ones take little effort.
 - **Known flake (not from B5):** under parallel load a suite's setup sometimes fails with a 500 on `POST /devices/claim`: the speaker's first connect and the claim both `upsert` the new `Device` row and one loses ("Unique constraint failed on the fields: (`id`)"). The suite fails as a whole; run again. Worth a small fix (catch and retry the upsert) when time allows.
 - **Not in B5:** family special days (birthdays) and "who called recently": nothing stores them (no birthday field; calls aren't logged anywhere), so they need new tables, web UI and a call log. Say so to the owner before adding. A "place" is per speaker; the time zone is still set by hand.
 - **Pending test for the owner (local):** (1) speaker page → Settings → Place: search "Dhaka", pick, Save; the **Today** box shows the Bangla date, weather and prayer times (compare with a prayer app: Bangladesh times differ by a minute or two between sources); (2) add a "Just says" routine `শুভ সকাল! আজ {date}। {weather}। {next_prayer}।` and **▶ Run now**: the speaker should say it; (3) ask Momo "আজ বাংলা কত তারিখ?", "আসরের ওয়াক্ত কখন?", "আজ বৃষ্টি হবে?"; she shouldn't mention prayer times unasked.
+- **Lesson: restarting the backend can leave the speaker showing offline (2026-10-17).** After a quick restart the hub's first MQTT logins are refused for about 5 s; the speaker's `hello` arrived in that window and was missed, and the speaker won't say hello again (the retained `ss/server/online` stayed `1`). Fix: publish `0` then `1` (retained) to `ss/server/online` on the local broker, or restart the backend once more; stop it with Ctrl+C, not a force-kill. Documented in `protocol.md`. A small code fix when there's time: once the hub's MQTT is connected, republish `0` then `1`, so every speaker says hello again.
 - **Local setup note:** the backend dev server (`nest start --watch`) was stopped from Claude's session for `prisma generate` (EPERM otherwise) and restarted in the background from there; it may be stopped when the session ends: `npm run start:dev` again.
+
+**B4 plan (next, not started; check the scope with the owner first):**
+- **Smallest useful version:** one table `Note` (`deviceId`, `kind`: `note`, `item_place`, `preference`, `person`, `summary`; `text`; `createdAt`), one migration.
+- **Momo tools:** `remember(kind, text)` ("আমার চশমা টেবিলে রাখলাম", "আমাকে আম্মা বলে ডাকবে") and `recall(question)`; a Momo tool result says what was saved, and she never claims it saved something the tool didn't confirm (same rule as `delete_sound`).
+- **Start of each conversation:** `instructions()` in `src/voice/momo.ts` gets the preferences and the last few summaries, the same way B5 added `context`. Keep it short (a few lines), or the instructions grow every day.
+- **After each conversation:** a one-line summary from the `VoiceLog` transcript. This needs one more Gemini call per conversation (small cost, and the free tier lets Google use requests, see the privacy note in section 1): ask the owner whether to do it, or to start with `remember` only.
+- **Privacy:** the family sees, edits and deletes the notes. Web first (rule 7): a "What Momo remembers" section on the speaker page (list, add, edit, delete; grouped by kind), then the app. Who may see: the owner only, or every family member? Ask.
+- **Tests:** `test/memory.e2e-spec.ts` with the fake AI (tools saved, instructions contain the notes, delete removes it, family access). Use the manual "Run now" and your own device: the test database is shared and other suites' ticks interfere (see B5 progress).
+- **Then step 3** (Care routines templates, see below), which reuses B2 routines and B5 placeholders.
 
 **Order:** B1 → B3 → B2 → B5 → B4. B1 and B3 are small and useful on their own; B2 needs both. Each block gets backend e2e tests (fake AI and fake speaker, as in `test/voice.e2e-spec.ts`) and a local test with the owner before the cloud.
 

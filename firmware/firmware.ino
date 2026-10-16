@@ -83,6 +83,11 @@ static void onAudio(uint8_t *payload, size_t length) { talkPush(payload, length)
 
 void setup() {
   Serial.begin(115200);
+  // USB plugged into a PC with no serial monitor reading: by default each print
+  // waits up to 2 s for room (core messages 100 ms per character), enough to
+  // trip the 5 s loop watchdog ("froze" ~12 s after every upload). 1 ms per try
+  // still keeps up with a monitor that is reading.
+  Serial.setTxTimeoutMs(1);
   Serial.setDebugOutput(true);  // ESP32 core error messages to this (USB) port too
   healthSetup();
   otaSetup();

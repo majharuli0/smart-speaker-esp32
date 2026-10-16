@@ -231,7 +231,7 @@ static String findWiring() {
 }
 
 static void mountCard() {
-  if (!SD.begin(SD_CS_GPIO, SPI, SD_SPI_HZ, "/sd", 2)) {
+  if (!SD.begin(SD_CS_GPIO, SPI, SD_SPI_HZ, "/sd", SD_MAX_FILES)) {
     SD.end();
     String problem = probeCard();
     static bool searched = false;
@@ -292,7 +292,7 @@ void cacheCheckNow() { lastCardCheck = millis() - SD_CHECK_MS; }
 
 void cacheSetup() {
   // formatOnFail: the very first boot formats the empty built-in storage (takes a few seconds)
-  stores[BUILTIN].ready = FFat.begin(true, "/ffat", 2, TONE_CACHE_PARTITION);
+  stores[BUILTIN].ready = FFat.begin(true, "/ffat", FFAT_MAX_FILES, TONE_CACHE_PARTITION);
   if (!stores[BUILTIN].ready) Serial.println("Built-in tone storage unavailable");
   prefs.begin("cache");
   loadWanted(prefs.getString("wanted", "[]"));

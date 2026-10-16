@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.30.1"
+#define FW_VERSION "0.30.2"
 
 // ---- Broker address and device secret: in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -56,6 +56,11 @@
 // Tones stored on the device (in the 9.9 MB "ffat" area) so alarms play the real tone offline
 #define TONE_CACHE_PARTITION "ffat"
 #define TONE_RETRY_MS 30000   // after a failed download, try again this much later
+// Files open at once on each storage (more gives "Too many open files"). At
+// worst on the built-in one: a ringing tone, a tone download, an upload or
+// move, a stored-tone check and a wake take. Each is ~4 KB of PSRAM.
+#define FFAT_MAX_FILES 6
+#define SD_MAX_FILES   4
 
 // microSD card module (SPI, 3V3): GPIO 10-13 sit together on the left header
 // and are the S3's own fast SPI pins. Card formatted FAT32.

@@ -135,6 +135,19 @@ These are the cheapest real improvements. Each comes early in the building block
 ### Step 1: Stability check on the cloud (small)
 Three loose ends from the deploy. One test session with the owner covers all three.
 
+**Progress 2026-10-16 (code side, local only, not committed):**
+- **Found: the speaker "froze" (watchdog restart) about 12 s after nearly every upload**, from 0.27 to 0.30.1. The boot events in the local database show it: `usb_reset`, then `froze` (task `IDLE1`, pc `0x40380107` = core 1 idle). Cause: with USB plugged into the PC and no serial monitor reading, the core's USB serial (`HWCDC`) waits up to 2 s per print (core messages 100 ms per character), so a few prints in one `loop()` pass trip the 5 s loop watchdog. After `power_on` it didn't happen. **Fix (firmware 0.30.2):** `Serial.setTxTimeoutMs(1)` in `setup()`. Flashed twice with no monitor open: no freeze.
+- **The 16:29:56 offline/online on 2026-10-16 was that freeze**, not Wi-Fi. The "audio link down" at 16:30:01 was the *old* link (the dead one from before the restart) being found by the server's 20 s ping. The new link stayed up, so the link *did* come back. The backend now closes an old link as soon as a new one from the same speaker logs in, and logs "old audio link closed (a new one replaced it)". New e2e case in `audio-link.e2e-spec.ts` (**68 e2e tests pass**).
+- The firmware now logs a failed audio-link attempt ("couldn't connect", "the server didn't accept the login"): the first one, then about once a minute. Before, failed retries were silent.
+- **"Too many open files": found.** FFat and the SD card were mounted with **2 open files at most**. A ringing tone + a tone download already use 2, so any third `open`/`exists` failed with ENFILE. No `File` was left open anywhere. Now `FFAT_MAX_FILES` 6 and `SD_MAX_FILES` 4 (`config.h`); the slots are in PSRAM (`CONFIG_FATFS_ALLOC_PREFER_EXTRAM`), so no internal RAM is used.
+- **Tested with the owner on the speaker (local, 0.30.2), 2026-10-16:**
+  - No restart for 2 h 44 m. The audio link stayed up the whole time.
+  - Hear the room (📞 Call) ran the full 10 min (19:31–19:41) with no dropout: 9,600,000 samples (600 s, none lost), 157–165 KB a minute over the link.
+  - RAM: 79 KB free, lowest 68 KB since boot (local; check again on the cloud with TLS).
+  - Delay: speaker → phone about 1 s at most. **The owner finds it acceptable**, so the buffers stay as they are.
+  - Unplugged while an alarm rang: back online in 5 s, the alarm rang again in the same minute, no file errors (while the page listed files at the same time).
+- **Open:** was the cloud dropout at 22:12 UTC on 2026-10-15 the same freeze? Check the cloud database's boot events around then (`Event`, `type='boot'`). If it was `froze`, it's fixed; if there's no boot, it was the network.
+
 1. **Dropout during "Hear the room".** At 22:12 UTC on 2026-10-15 the speaker went offline for about 2 s during a listen session, then came back. Was it a restart or Wi-Fi?
    - Record the serial log (no reset) while the owner uses Hear the room for 2–3 minutes. Look for `rst:`, `Guru`, `abort`, "audio link down".
    - Also check the free internal RAM in the stats module during a listen session.

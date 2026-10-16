@@ -177,11 +177,14 @@ static void linkTask(void *) {
     esp_transport_handle_t ws = esp_transport_ws_init(base);
     esp_transport_ws_set_path(ws, path.c_str());
     ws_transport_opcodes_t op;
+    const char *failed = nullptr;
     bool ok = esp_transport_connect(ws, host.c_str(), port, 5000) >= 0;
+    if (!ok) failed = "couldn't connect";
     if (ok) {  // log in like on MQTT: the device ID and its password
       String hello = "{\"type\":\"hello\",\"id\":\"" + deviceId + "\",\"password\":\"" + netPassword() + "\"" +
                      (encoder ? ",\"codec\":\"opus\"}" : "}");
       ok = sendText(ws, hello);
+      if (!ok) failed = "sending the login failed";
     }
     if (ok) {
       int r = readFrame(ws, rx, sizeof(rx) - 1, 5000, &op);
@@ -190,10 +193,15 @@ static void linkTask(void *) {
         rx[r] = 0;
         ok = strstr((char *)rx, "\"ok\"") != nullptr;
       }
+      if (!ok) failed = "the server didn't accept the login";
     }
+    static unsigned tries = 0;  // failed in a row: said on the first, then about once a minute
     if (ok) {
       up = true;
+      tries = 0;
       Serial.println("Audio link up: " + u);
+    } else if (tries++ % 20 == 0) {
+      Serial.printf("Audio link: %s (%s, errno %d, try %u)\n", failed, u.c_str(), esp_transport_get_errno(ws), tries);
     }
     unsigned long lastSent = millis(), lastReport = millis();
     size_t sentBytes = 0;

@@ -1,4 +1,4 @@
-# Next steps: handoff and plan (written 2026-10-16, updated 2026-10-17 after steps 0, 1 and blocks B1, B3, B2, B5, B4)
+# Next steps: handoff and plan (written 2026-10-16, updated 2026-10-17 after steps 0, 1, blocks B1, B3, B2, B5, B4 and step 3)
 
 Read this file first in a new chat. It covers what is live, how we work, what we measured, and what to do next, in order.
 
@@ -316,7 +316,15 @@ The owner's rule: use cases must be **dynamic**, so new ones take little effort.
 - **Owner's call (2026-10-16): the missed-alarm and quiet-hours decisions can wait; local tests come later, in a batch.**
 - **Quiet hours: not part of B1.** The app's "Quiet hours" setting is about a silent doorbell at night, is still phone-only, and does nothing.
 
-### Step 3: Templates in the apps
+### Step 3: Templates in the apps ✅ built 2026-10-17 (backend `abef291`, web `167e2a2`, app `9b77340`), local only
+- **Backend:** templates are data in `src/routines/routine-templates.ts` (a new use case is a new entry). `GET /routine-templates` lists them; `Routine.template` (migration `routine_template`) says which template a routine came from, and `POST /routines` accepts `template`. **Five templates:** medicine check (asks, wants a yes, asks again, tells the family), drink water, morning greeting (`{date}`, `{weather}`, `{next_prayer}`), daily check-in (any answer, tells the family if none), call-the-family nudge (Fridays). 100 e2e tests pass (a new case in `routines.e2e-spec.ts`).
+- **Web:** a **"Care routines"** section on the speaker page: a card per template with "Turn on" / "Add another", and on each routine an on/off switch, time, words, days, "tell the family", **▶ Run now**, Delete, and **today's result** (answered, no answer · family told…). The old box is now **"Custom routines"** (the ones without a template) with the full run log.
+- **App:** two new screens under Settings on the speaker page: **Care routines** (same things: turn on, switch, change time, words and days, run now, delete, today's result) and **What Momo remembers** (list, add, edit, delete). The API client is regenerated. **Needs a new build** (the app was only type-checked).
+- **Not templated (need triggers a routine doesn't have):** prayer-time / azan and birthday greetings. "Call the family" is a plain weekly nudge, not "no call for N days". Add these when yearly dates, prayer-time and event triggers exist (see "Not in B2").
+- **Not in the app:** setting the speaker's place (web only), "say something now" (needs an audio recording package), the full run log.
+
+**Small fixes done 2026-10-17 (backend `be7d5c5`):** the `POST /devices/claim` / first-hello upsert race (insert-if-missing, then update), and the hub publishes `ss/server/online` `0` then `1` when its MQTT connects, so a quick backend restart no longer leaves the speaker showing offline (checked live: it came back by itself).
+
 - A **"Care routines"** page (web first, then app) replaces the plain Routines box that B2 already put on the device page. It lists ready-made templates: Medicine check, Drink water, Morning greeting, Prayer times, Daily check-in, Birthday greetings, Call family nudge.
 - Each has a few plain settings (times, who to alert, the sentence) and an on/off switch.
 - Templates are data (JSON in the backend), so a new use case is a new template, not new code.

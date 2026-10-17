@@ -4,6 +4,14 @@ Read this file first in a new chat. It covers what is live, how we work, what we
 
 **To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 2, block B4. Check with me on scope first."* (B4 = Momo remembers: notes and preferences per speaker. Then step 3. B5, the context Momo and routines know, is built: see "B5 progress".)
 
+**Deployed to the cloud 2026-10-17 (08:14-08:30 UTC):** everything up to backend `a10eb71`, web `4bf42e4`, app `248b621`, firmware 0.30.2 (`led-demo` `1050625`) is pushed to GitHub and live on smart-speaker.duckdns.org.
+- Backups first: `~/backups/speaker-20261017-081434.sql.gz` (11 tables, complete) and `speaker-files-20261017-081434.tgz`.
+- Backend rebuilt; 8 migrations applied on start (`notify_settings` … `call_seen`); log: "Voice on (Gemini)", "Push notifications on (Firebase)", "MQTT connected". Web `dist` replaced; site 200, API up, audio-link route 101.
+- Speaker reflashed with `secrets.h` → `mqtts://smart-speaker.duckdns.org:8883`: boot log "Server online"; server log "Device online", "audio link up (Opus)". **The speaker is on the cloud now:** to work locally again, switch `MQTT_URI` back to the local line and reflash.
+- **Settled:** the cloud dropout at 22:12 UTC on 2026-10-15 was a `froze` restart on 0.30.1 (the freeze fixed in 0.30.2), not the network.
+- **Still to check by the owner:** the RAM line on the speaker page (Device tab → Health) with TLS, a 2-minute 📞 Call, and a new phone app build (it has all the new screens).
+- Everything below in this file about "not pushed, not deployed" is history from before this deploy.
+
 ---
 
 ## 1. Where things stand

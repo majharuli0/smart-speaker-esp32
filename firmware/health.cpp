@@ -5,6 +5,7 @@
 #include <esp_core_dump.h>
 #include "config.h"
 #include "net.h"
+#include "timesync.h"
 
 static String bootReport;  // sent once, when the server is reachable
 
@@ -29,6 +30,7 @@ void healthSetup() {
   doc["type"] = "boot";
   doc["reason"] = reasonName(esp_reset_reason());
   doc["fw"] = FW_VERSION;
+  doc["clock"] = timeSource();  // "rtc": the DS3231 had the time at boot (timeFromRtc ran first)
 
   // A crash leaves a report in the 64 KB coredump partition: summarise it, then clear it
   if (esp_core_dump_image_check() == ESP_OK) {

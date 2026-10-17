@@ -63,6 +63,7 @@ static void sendStats() {
   doc["board"] = CONFIG_IDF_TARGET;          // which firmware file fits this device
   doc["time"] = timeNow();                  // local time, "" until NTP has synced
   doc["tz"] = timezoneName();
+  doc["rtc"] = rtcState();                 // the DS3231 clock module
 
   String out;
   serializeJson(doc, out);

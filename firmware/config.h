@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.30.2"
+#define FW_VERSION "0.31.1"
 
 // ---- Broker address and device secret: in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -22,6 +22,11 @@
 #define NTP_SERVER_2 "time.google.com"
 #define DEFAULT_TZ_POSIX "UTC0"  // until the server sends the real zone
 #define DEFAULT_TZ_NAME  "UTC"
+// DS3231 clock module (I2C), keeps the time through power cuts on its coin battery.
+// VCC to 3V3, GND to GND, SQW and 32K unconnected. Optional: without it, the clock
+// waits for NTP as before.
+#define RTC_SDA_GPIO 21
+#define RTC_SCL_GPIO 47
 
 // ---- Board: ESP32-S3-WROOM-1 N16R8 (16 MB flash, 8 MB PSRAM) only ----
 #if !CONFIG_IDF_TARGET_ESP32S3

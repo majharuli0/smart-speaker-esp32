@@ -89,6 +89,7 @@ void setup() {
   // still keeps up with a monitor that is reading.
   Serial.setTxTimeoutMs(1);
   Serial.setDebugOutput(true);  // ESP32 core error messages to this (USB) port too
+  timeFromRtc();  // first: alarms can ring from the first loop() even without internet
   healthSetup();
   otaSetup();
   ledSetup();

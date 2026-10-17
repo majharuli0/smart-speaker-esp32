@@ -138,7 +138,21 @@ INMP441 microphone (I2S, the second port; **3.3 V only**). Keep its wires short 
 | SD | GPIO 9 |
 | L/R | GND (left channel) |
 
-Check it from the web app: the speaker's page → **Microphone** → **Record a test** (owner only).
+DS3231 clock module (I2C, optional): keeps the time through power cuts, so alarms ring without
+internet. With a plain CR2032 battery on the common ZS-042 board, remove its charging diode or resistor.
+
+| Clock pin | ESP32-S3 |
+|---|---|
+| VCC | 3V3 |
+| GND | GND |
+| SDA | GPIO 21 |
+| SCL | GPIO 47 |
+| SQW, 32K | not connected |
+
+The serial log shows `Clock from DS3231: …` at boot; the first time (new module), it shows
+`not set yet` and then `DS3231 set from NTP` once the speaker is online.
+
+Check the mic from the web app: the speaker's page → **Microphone** → **Record a test** (owner only).
 
 Arduino IDE settings, if not using `./fw.sh`: Board **ESP32S3 Dev Module**, Flash Size **16MB**, PSRAM
 **OPI PSRAM**, Partition Scheme **16M Flash (3MB APP/9.9MB FATFS)**, library **ArduinoJson** (v7),

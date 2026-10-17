@@ -123,7 +123,7 @@ Key: ✅ works today · 🟡 partly there · ❌ not built
 | Family voice messages | 🟡 record a message as a reminder, or upload a file and play it | **small** ("send a message now") |
 | Scheduled wellbeing check-ins | ❌ | medium (the server starts a conversation at set times; the speaker already supports it) |
 | Emergency help button | ❌ the speaker has **no buttons at all** (no input pins); voice "call family" is the only substitute | hardware + firmware + push |
-| Internet loss and offline mode | 🟡 alarms and stored tones work offline, but **only once the clock is set** (no RTC: after a power cut without internet, alarms stay silent). No feedback after the wake word; no offline commands | medium–large (step 4) |
+| Internet loss and offline mode | 🟡 alarms and stored tones work offline, but **only once the clock is set**. Firmware 0.31.x reads a DS3231 clock module at boot (GPIO 21/47), so with one fitted, alarms ring after a power cut without internet (not yet tested on hardware). Without it, alarms stay silent until NTP. No feedback after the wake word; no offline commands | medium–large (step 4) |
 | Bangla stories, poetry, culture | 🟡 chat only; the "one or two sentences" rule and the 180 s cap block real stories | **small** (a story mode) |
 | Lost-item memory | ❌ | medium |
 | Appointment and schedule assistant | 🟡 one-time reminders on a date | small–medium |

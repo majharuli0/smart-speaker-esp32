@@ -4,6 +4,8 @@ Read this file first in a new chat. It covers what is live, how we work, what we
 
 **To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 2, block B4. Check with me on scope first."* (B4 = Momo remembers: notes and preferences per speaker. Then step 3. B5, the context Momo and routines know, is built: see "B5 progress".)
 
+**Deployed 2026-10-17 14:15-14:18 UTC: Momo memory fix** (backend `42981af`, `f6dd497`; backup `~/backups/speaker-20261017-141514.*`). Found by the owner: item places were saved without the thing ("ড্রয়ারের ভিতর"), so "চশমা কোথায়?" offered every place. Now the note always names the thing ("চশমা: ড্রয়ারের ভিতর"), a place without a thing is refused, and words match in either encoding of য়. The two cloud notes were renamed by hand (চশমা, মানিব্যাগ, from the voice log).
+
 **Deployed to the cloud 2026-10-17 (12:35-12:40 UTC):** backend `9cc1be6` (includes `98bdb35`, wake check), web `501f085`, firmware 0.31.1 (`led-demo` `691a013`, flashed over USB). Backups: `~/backups/speaker-20261017-123558.*`. New: **DS3231 battery clock** (GPIO 21/47; boot events carry `clock: "rtc"`, verified in the cloud database; Health shows "Battery clock working") and **12-hour times on the web** (AM/PM picker for alarms, routines and care routines). Still to test by the owner: an alarm with the router off after a power cut. The phone app already shows 12-hour times; only its care-routine time box asks for 24-hour input ("08:30", `app/care.tsx`).
 
 **Deployed to the cloud 2026-10-17 (08:14-08:30 UTC):** everything up to backend `a10eb71`, web `4bf42e4`, app `248b621`, firmware 0.30.2 (`led-demo` `1050625`) is pushed to GitHub and live on smart-speaker.duckdns.org.

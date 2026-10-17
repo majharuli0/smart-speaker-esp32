@@ -332,7 +332,9 @@ The owner's rule: use cases must be **dynamic**, so new ones take little effort.
   - **Volume scale: checked in the firmware.** 0-100, loudness is `volume² / 10000` (50 = a quarter of full amplitude); the speaker reports it at connect and on every change. `set_volume`'s steps of 20 and levels 1-10 (= 10-100) match. Not tried by voice on the speaker yet.
   - **App:** the speaker's place (Settings → Place: find a town, pick, Clear), a **Voice message** card (record, plays at once after a chime, not kept), the routine run log ("What happened" on Care routines), recent calls. Only type-checked: needs a new build.
   - **Not done:** missed-alarm alerts (wait for the physical buttons: stop alarm, emergency, Momo wake-up, reset); prayer-time and birthday templates.
-  - 104 e2e tests pass.
+  - **Momo looks things up (owner, 2026-10-17: "Momo should know everything we have"):** not in her instructions (that costs tokens on every turn), but through `recall` kinds: `calls` (who called or talked), `talks` (earlier conversations), `doorbell` (recent rings), `routine_log` (routine questions and answers), `help` (what the speaker and the apps can do: `HELP` in `momo.ts`, keep it in step with new features), plus the notes. Only the longer tool description is added to every conversation (about 40 tokens).
+  - **Fixed: the goodbye said twice.** Momo said goodbye, called `end_conversation`, then answered the tool's result with a second goodbye, which played. Now, if she already spoke in that turn, everything after is dropped and the tool tells her to say nothing more (fewer output tokens too); if she hadn't, her next turn is the goodbye and then it goes quiet.
+  - 107 e2e tests pass.
 
 **Small fixes done 2026-10-17 (backend `be7d5c5`):** the `POST /devices/claim` / first-hello upsert race (insert-if-missing, then update), and the hub publishes `ss/server/online` `0` then `1` when its MQTT connects, so a quick backend restart no longer leaves the speaker showing offline (checked live: it came back by itself).
 

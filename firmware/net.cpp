@@ -10,6 +10,7 @@
 #include "mbedtls/platform.h"
 #include "config.h"
 #include "audiolink.h"
+#include "audiostats.h"
 
 // Topics (see docs/protocol.md):
 //   ss/dev/<id>/cmd     ← commands         ss/dev/<id>/evt     → replies and status
@@ -118,7 +119,10 @@ static void queue(Kind kind, const char *data, size_t length) {
     memcpy(item.data, data, length);
     item.data[length] = 0;
   }
-  if (xQueueSend(inbox, &item, 0) != pdTRUE) free(item.data);  // full: drop (only audio arrives that fast)
+  if (xQueueSend(inbox, &item, 0) != pdTRUE) {  // full: drop (only audio arrives that fast)
+    free(item.data);
+    if (kind == AUDIO) audioStats.inboxDrops++;
+  }
 }
 
 static bool topicIs(const esp_mqtt_event_handle_t e, const String &topic) {

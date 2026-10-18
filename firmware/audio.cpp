@@ -7,6 +7,9 @@
 #include "net.h"
 #include "tonecache.h"
 #include "files.h"
+#include "audiostats.h"
+
+AudioCounters audioStats = {};
 
 static Preferences prefs;
 static int volume = DEFAULT_VOLUME;
@@ -153,6 +156,7 @@ static void outputTask(void *) {
     playCount = playCount - n;
     taskEXIT_CRITICAL(&playMux);
     for (size_t i = n; i < BLOCK; i++) mono[i] = 0;  // nothing to play: silence
+    if (n < BLOCK && talking && talkPlaying) audioStats.underruns++;  // talk was playing but ran short
     if (sweepPushed && !sweepPlayed && sweepPush - first < n) {
       sweepTx = txIndex + (sweepPush - first);
       sweepPlayed = true;
@@ -386,10 +390,12 @@ void talkPush(const uint8_t *data, size_t len) {
     if (talkCount == TALK_BUF_SAMPLES) {  // full (browser clock slightly fast): drop oldest
       talkHead = (talkHead + 1) % TALK_BUF_SAMPLES;
       talkCount--;
+      audioStats.talkDrops++;
     }
     talkBuf[(talkHead + talkCount) % TALK_BUF_SAMPLES] = (int16_t)(data[i] | (data[i + 1] << 8));
     talkCount++;
   }
+  if (talkCount > audioStats.talkPeak) audioStats.talkPeak = talkCount;
 }
 
 static void pumpTalk() {
@@ -400,7 +406,10 @@ static void pumpTalk() {
   }
   if (talkCount == 0) {
     if (talkEnding) talkEnd(false);                                              // played out the last words
-    else if (millis() - talkLastPlayed > TALK_DRY_MS) talkPlaying = false;  // starved: buffer up again
+    else if (millis() - talkLastPlayed > TALK_DRY_MS) {  // starved: buffer up again
+      talkPlaying = false;
+      audioStats.talkStarves++;
+    }
     return;
   }
 

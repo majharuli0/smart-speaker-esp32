@@ -8,6 +8,7 @@
 #include "freertos/idf_additions.h"
 #include "net.h"
 #include "opus.h"
+#include "audiostats.h"
 
 static const uint8_t MIC_OPUS = 0x01, TALK_OPUS = 0x02, MIC_PCM = 0x03, TALK_PCM = 0x04;
 static const int OPUS_FRAME = 320;     // samples: 20 ms
@@ -63,6 +64,8 @@ static volatile bool urlChanged = false;
 static volatile bool up = false;
 static RingbufHandle_t outbox;    // mic frames, whole, ready to send
 static uint16_t micSeq = 0;       // mic task only
+static uint16_t talkSeq = 0;      // link task only: the last talk frame's number
+static bool talkSeqSeen = false;
 
 void audioLinkSetUrl(const String &u) {
   xSemaphoreTake(urlLock, portMAX_DELAY);
@@ -79,7 +82,10 @@ bool audioLinkUp() { return up; }
 bool audioLinkSendMic(const uint8_t *pcm, size_t length) {
   if (!up) return false;
   uint8_t *slot = nullptr;
-  if (xRingbufferSendAcquire(outbox, (void **)&slot, length + 3, 0) != pdTRUE) return false;  // full: dropped
+  if (xRingbufferSendAcquire(outbox, (void **)&slot, length + 3, 0) != pdTRUE) {  // full: dropped
+    audioStats.outboxDrops++;
+    return false;
+  }
   slot[0] = MIC_PCM;
   slot[1] = micSeq >> 8;
   slot[2] = micSeq & 255;
@@ -130,7 +136,11 @@ static int readFrame(esp_transport_handle_t ws, uint8_t *buf, size_t size, int t
 static bool sendFrame(esp_transport_handle_t ws, bool binary, void *data, size_t length) {
   auto op = (ws_transport_opcodes_t)((binary ? WS_TRANSPORT_OPCODES_BINARY : WS_TRANSPORT_OPCODES_TEXT) |
                                      WS_TRANSPORT_OPCODES_FIN);
-  return esp_transport_ws_send_raw(ws, op, (const char *)data, length, 2000) >= 0;
+  unsigned long t0 = millis();
+  bool ok = esp_transport_ws_send_raw(ws, op, (const char *)data, length, 2000) >= 0;
+  uint32_t took = millis() - t0;
+  if (took > audioStats.sendMaxMs) audioStats.sendMaxMs = took;
+  return ok;
 }
 
 static bool sendText(esp_transport_handle_t ws, const String &text) {
@@ -205,6 +215,7 @@ static void linkTask(void *) {
     }
     unsigned long lastSent = millis(), lastReport = millis();
     size_t sentBytes = 0;
+    talkSeqSeen = false;  // a new link starts its numbering again
     const char *why = "the server went away";
     while (ok && netConnected() && !urlChanged) {
       size_t size;
@@ -230,8 +241,15 @@ static void linkTask(void *) {
         break;
       }
       if (r > 0 && op == WS_TRANSPORT_OPCODES_TEXT) netDeliverCommand(rx, r);
-      else if (r > 3 && op == WS_TRANSPORT_OPCODES_BINARY && rx[0] == TALK_PCM) netDeliverAudio(rx + 3, r - 3);
-      else if (r > 3 && op == WS_TRANSPORT_OPCODES_BINARY && rx[0] == TALK_OPUS && decoder) decodeTalk(rx + 3, r - 3);
+      else if (r > 3 && op == WS_TRANSPORT_OPCODES_BINARY && (rx[0] == TALK_PCM || rx[0] == TALK_OPUS)) {
+        // The server numbers every binary frame: a jump means frames went missing on the way
+        uint16_t seq = (rx[1] << 8) | rx[2];
+        if (talkSeqSeen) audioStats.rxGaps += (uint16_t)(seq - (uint16_t)(talkSeq + 1));
+        talkSeq = seq;
+        talkSeqSeen = true;
+        if (rx[0] == TALK_PCM) netDeliverAudio(rx + 3, r - 3);
+        else if (decoder) decodeTalk(rx + 3, r - 3);
+      }
       if (millis() - lastReport > 60000) {  // how much it sends, and how deep Opus goes into the stack
         Serial.printf("Audio link: %u bytes of mic audio in the last minute; stack left %u\n", (unsigned)sentBytes,
                       (unsigned)uxTaskGetStackHighWaterMark(nullptr));
@@ -244,9 +262,11 @@ static void linkTask(void *) {
         lastSent = millis();
       }
     }
-    if (up)
+    if (up) {
+      audioStats.linkDowns++;
       Serial.printf("Audio link down: %s (errno %d, frames waiting %u)\n", why, esp_transport_get_errno(ws),
                     (unsigned)(OUTBOX_BYTES - xRingbufferGetCurFreeSize(outbox)));
+    }
     up = false;
     size_t size;
     void *item;

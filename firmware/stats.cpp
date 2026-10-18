@@ -10,6 +10,7 @@
 #include "net.h"
 #include "timesync.h"
 #include "tonecache.h"
+#include "audiostats.h"
 #include <FFat.h>
 #include <LittleFS.h>
 
@@ -64,6 +65,16 @@ static void sendStats() {
   doc["time"] = timeNow();                  // local time, "" until NTP has synced
   doc["tz"] = timezoneName();
   doc["rtc"] = rtcState();                 // the DS3231 clock module
+  JsonObject audio = doc["audio"].to<JsonObject>();  // the audio path's counters, totals since boot
+  audio["talkDrops"] = audioStats.talkDrops;
+  audio["talkStarves"] = audioStats.talkStarves;
+  audio["talkPeak"] = audioStats.talkPeak;
+  audio["underruns"] = audioStats.underruns;
+  audio["inboxDrops"] = audioStats.inboxDrops;
+  audio["outboxDrops"] = audioStats.outboxDrops;
+  audio["linkDowns"] = audioStats.linkDowns;
+  audio["sendMaxMs"] = audioStats.sendMaxMs;
+  audio["rxGaps"] = audioStats.rxGaps;
 
   String out;
   serializeJson(doc, out);

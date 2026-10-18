@@ -69,6 +69,7 @@ static void sendStats() {
   audio["talkDrops"] = audioStats.talkDrops;
   audio["talkStarves"] = audioStats.talkStarves;
   audio["talkPeak"] = audioStats.talkPeak;
+  audio["talkSkips"] = audioStats.talkSkips;
   audio["underruns"] = audioStats.underruns;
   audio["inboxDrops"] = audioStats.inboxDrops;
   audio["outboxDrops"] = audioStats.outboxDrops;

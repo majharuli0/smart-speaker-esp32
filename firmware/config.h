@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.32.0"
+#define FW_VERSION "0.33.0"
 
 // ---- Broker address and device secret: in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -97,11 +97,17 @@
 // Off: the first try stopped it on its own echo and on noise; being tuned.
 #define BARGE_IN 0
 
-// Live voice from the browser (same 16 kHz mono format as tones). It arrives in
-// 125 ms pieces (the cloud broker allows the server only 10 messages a second).
+// Live voice from the browser, the app or the AI (same 16 kHz mono format as tones).
+// Over the audio link it arrives as it's made (20-100 ms pieces); over MQTT in 125 ms pieces.
 #define TALK_BUF_SAMPLES 16000  // 1 s ring buffer; when full the oldest audio is dropped
-#define TALK_PREBUFFER   3000   // wait for ~190 ms (2 pieces) before playing, to ride out gaps between pieces
+#define TALK_PREBUFFER   2000   // wait for 125 ms before playing, to ride out gaps between pieces
 #define TALK_DRY_MS      150   // no audio for longer than the I2S queue holds → buffer up again
+// Catching up: when a burst leaves more than TALK_CATCHUP_AT waiting while it plays,
+// the oldest is dropped down to TALK_CATCHUP_TO, so the delay doesn't stay raised.
+// Above what the server keeps ahead on purpose (the AI's voice: 240 ms on the
+// audio link, 375 ms over MQTT), so only a real backlog is skipped.
+#define TALK_CATCHUP_AT  8000   // 500 ms
+#define TALK_CATCHUP_TO  4000   // 250 ms
 
 // ---- Updates over Wi-Fi ----
 #define OTA_CONFIRM_MS 180000  // a new version must reach the server within 3 min of boot, or it's rolled back

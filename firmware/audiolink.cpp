@@ -57,6 +57,7 @@ static void decodeTalk(const uint8_t *in, int length) {
 }
 static const size_t OUTBOX_BYTES = 32 * 1024;  // ~1 s of mic audio waiting to go
 static const unsigned long KEEPALIVE_MS = 15000;
+static const unsigned long SILENT_MS = 30000;  // nothing from the server this long: reconnect
 
 static SemaphoreHandle_t urlLock;
 static String url;                // set from the main loop, read by the link task
@@ -216,6 +217,10 @@ static void linkTask(void *) {
     unsigned long lastSent = millis(), lastReport = millis();
     size_t sentBytes = 0;
     talkSeqSeen = false;  // a new link starts its numbering again
+    // The server's keep-alive ({"type":"ka"}, every 5 s): once it has come, a long
+    // silence means the link is dead even though nothing failed (a lost network)
+    bool kaSeen = false;
+    unsigned long lastHeard = millis();
     const char *why = "the server went away";
     while (ok && netConnected() && !urlChanged) {
       size_t size;
@@ -240,8 +245,11 @@ static void linkTask(void *) {
         why = op == WS_TRANSPORT_OPCODES_CLOSE ? "the server closed it" : "reading failed";
         break;
       }
-      if (r > 0 && op == WS_TRANSPORT_OPCODES_TEXT) netDeliverCommand(rx, r);
-      else if (r > 3 && op == WS_TRANSPORT_OPCODES_BINARY && (rx[0] == TALK_PCM || rx[0] == TALK_OPUS)) {
+      if (r > 0) lastHeard = millis();
+      if (r > 0 && op == WS_TRANSPORT_OPCODES_TEXT) {
+        if (r >= 12 && memcmp(rx, "{\"type\":\"ka\"", 12) == 0) kaSeen = true;  // only a sign of life
+        else netDeliverCommand(rx, r);
+      } else if (r > 3 && op == WS_TRANSPORT_OPCODES_BINARY && (rx[0] == TALK_PCM || rx[0] == TALK_OPUS)) {
         // The server numbers every binary frame: a jump means frames went missing on the way
         uint16_t seq = (rx[1] << 8) | rx[2];
         if (talkSeqSeen) audioStats.rxGaps += (uint16_t)(seq - (uint16_t)(talkSeq + 1));
@@ -249,6 +257,10 @@ static void linkTask(void *) {
         talkSeqSeen = true;
         if (rx[0] == TALK_PCM) netDeliverAudio(rx + 3, r - 3);
         else if (decoder) decodeTalk(rx + 3, r - 3);
+      }
+      if (kaSeen && millis() - lastHeard > SILENT_MS) {
+        why = "nothing from the server for 30 s";
+        break;
       }
       if (millis() - lastReport > 60000) {  // how much it sends, and how deep Opus goes into the stack
         Serial.printf("Audio link: %u bytes of mic audio in the last minute; stack left %u\n", (unsigned)sentBytes,

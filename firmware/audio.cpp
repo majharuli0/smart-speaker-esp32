@@ -41,7 +41,7 @@ static int readRetries = 0;   // reopening a file after a failed read
 // the amp never runs dry and the delay from here to the loudspeaker stays the
 // same. Each block played is also kept in refRing, numbered (txIndex): what the
 // mic hears back from the loudspeaker, for echo cancellation.
-static const size_t PLAY_RING = 2048;    // 128 ms waiting to play
+static const size_t PLAY_RING = 1024;    // 64 ms waiting to play (the amp's own queue holds 64 ms more)
 static const uint32_t REF_RING = 32768;  // the last ~2 s played
 static const size_t BLOCK = 256;         // 16 ms
 static int16_t *playRing = nullptr;
@@ -396,6 +396,12 @@ void talkPush(const uint8_t *data, size_t len) {
     talkCount++;
   }
   if (talkCount > audioStats.talkPeak) audioStats.talkPeak = talkCount;
+  if (talkPlaying && talkCount > TALK_CATCHUP_AT) {  // a burst: skip ahead rather than stay behind
+    size_t skip = talkCount - TALK_CATCHUP_TO;
+    talkHead = (talkHead + skip) % TALK_BUF_SAMPLES;
+    talkCount -= skip;
+    audioStats.talkSkips++;
+  }
 }
 
 static void pumpTalk() {

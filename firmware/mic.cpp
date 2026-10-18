@@ -42,6 +42,7 @@ static const uint32_t BARGE_RUN = 6;          // 300 ms
 static const float BARGE_KEPT = 0.2f;         // the cancelled audio is at least this much of the mic's (-7 dB)
 static const uint32_t BARGE_GRACE_MS = 800;
 static volatile bool bargeIn = false;  // the person spoke over the AI: the main loop cuts it (talkStop)
+static volatile bool againAsked = false;  // the server's turn_again (main loop → mic task)
 
 // The mic answers in one slot of each stereo frame (which one, its L/R pin
 // decides): both are read, and the louder one is kept
@@ -182,9 +183,13 @@ static void micTask(void *) {
   bool idleEnded = false;
   char json[360];
 
-  auto turnEvent = [&](const char *state) {
-    snprintf(json, sizeof(json), "{\"type\":\"turn\",\"state\":\"%s\",\"pieces\":%lu}", state,
-             (unsigned long)pieces);
+  // speechMs: at the end of a turn, how long they spoke (the server ignores a
+  // turn with too little sound in it); -1 at its start
+  auto turnEvent = [&](const char *state, long speechMs = -1) {
+    int n = snprintf(json, sizeof(json), "{\"type\":\"turn\",\"state\":\"%s\",\"pieces\":%lu", state,
+                     (unsigned long)pieces);
+    if (speechMs >= 0) n += snprintf(json + n, sizeof(json) - n, ",\"speech\":%ld", speechMs);
+    snprintf(json + n, sizeof(json) - n, "}");
     netSendNow(json);
   };
   auto flush = [&]() {  // send the piece being filled now (the end of a turn)
@@ -262,9 +267,10 @@ static void micTask(void *) {
           turnEvent("speaking");
         } else if (turn == SPEAKING && (quietMs >= (uint32_t)s.endSilenceMs || turnMs >= TURN_MAX_MS)) {
           flush();
+          long spoke = (long)turnMs - (long)quietMs;  // the turn, less the quiet that ended it
           turn = THINKING;
           turnMs = 0;
-          turnEvent("done");
+          turnEvent("done", spoke > 0 ? spoke : 0);
         } else if (turn == WAITING && s.idleMs && turnMs >= (uint32_t)s.idleMs) {
           idleEnded = true;  // nothing said on their turn: that's all
         } else if (turn == THINKING && turnMs >= THINK_MAX_MS) {
@@ -344,6 +350,15 @@ static void micTask(void *) {
     if (audioBusy()) {
       if (speakerQuiet) wakeInterrupt();
       speakerQuiet = 0;
+    }
+    // The server set the last turn aside (too little sound in it, or noise): it's
+    // their turn again, quietly (no beep: they didn't really speak)
+    if (againAsked) {
+      againAsked = false;
+      if (on && s.conversation && turn == THINKING) {
+        turn = WAITING;
+        turnMs = 0;
+      }
     }
     // A conversation: the AI speaking is its turn; when it's done, a beep, and
     // it's the person's turn again
@@ -509,6 +524,8 @@ void micStop(bool quiet) {
 }
 
 bool micBusy() { return running; }
+
+void micTurnAgain() { againAsked = true; }
 
 MicState micState() {
   if (!running) return MIC_OFF;

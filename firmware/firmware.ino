@@ -73,7 +73,7 @@ static void onCommand(uint8_t *payload, size_t length) {
   else if (cmd == "mic_record")
     micRecord({doc["seconds"] | 5, doc["endSilence"] | 0, doc["live"] | false, doc["wakeTake"] | 0,
                doc["wakeTest"] | false, doc["afterWake"] | false, doc["conversation"] | false,
-               doc["idle"] | 0, doc["echoTest"] | false, doc["aec"] | false, doc["fd"] | false});
+               doc["idle"] | 0, doc["echoTest"] | false, doc["aec"] | false, doc["fd"] | false, doc["ns"] | 0});
   else if (cmd == "mic_stop") micStop(doc["quiet"] | false);
   else if (cmd == "turn_again") micTurnAgain();
   else if (cmd == "wake_config") wakeConfig(doc["enabled"] | false, doc["sensitivity"] | 5);

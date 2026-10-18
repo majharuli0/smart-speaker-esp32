@@ -1,6 +1,6 @@
 # Audio plan: reliable, lower-delay, full-duplex two-way voice (and a cleaner mic)
 
-Status (2026-10-19): Phases 0, 1 and 2 done and tested by the owner, plus two rounds of Momo fixes; Phase 2 also merged "hear the room" and "talk" into one Call in the web and the app. Next: Phase 3 (cleaner mic: the owner's fan is audible in calls now that the room is heard all the time). Work happens on branch `feat/audio-duplex` in all four repos; each tested step is fast-forwarded into main and pushed.
+Status (2026-10-19): Phases 0, 1 and 2 done and tested by the owner, plus two rounds of Momo fixes; Phase 2 also merged "hear the room" and "talk" into one Call in the web and the app. Phase 3 step 2 (noise filter for calls, a setting per speaker) done and tested locally by the owner on 2026-10-19; gain control (step 4) is still to do. Work happens on branch `feat/audio-duplex` in all four repos; each tested step is fast-forwarded into main and pushed.
 
 Deployed on the cloud 2026-10-19: Phase 2 and the Bangla/English prompt fix, speaker firmware 0.35.1 (flashed over USB with the cloud `secrets.h`); backend `380e6d4`, web `c2dd8c4`, app `7562b46` (main), firmware from `e3ca1a9`. Backup first: `~/backups/speaker-20261018-183127.*`. The app is built by the owner on the Mac.
 
@@ -151,6 +151,17 @@ Docs: add the new fields to `protocol.md` under `mic_record`.
 Acceptance (batch C): while the room talks, the caller's own voice comes back to the phone at least 25 dB down; the room voice stays understandable while the speaker plays; core 1 under 70% CPU; `dropped` = 0; `heapMin` at least 40 KB. Risk: the round trip is over 1 s, so keep call volume sensible.
 
 ## Phase 3: cleaner voice (noise suppression and gain) without losing words
+
+### Phase 3 results so far (2026-10-19)
+
+- **Spike** (60 s after boot, cloud TLS up, idle): ESP-SR `ns_pro_create` takes 0 internal + 41 KB PSRAM and 1.7 ms per 10 ms frame (17% of a core) at every mode; the older `ns_create` costs the same. `esp_agc` takes 0.7 KB PSRAM and 0.05 ms. Idle internal RAM: 59 KB free, largest block 32 KB, lowest 44 KB (the owner sees ~41 KB lowest on the cloud; likely the two TLS sessions, not this work: the firmware's own internal RAM grew 16 bytes in 0.35 and ~0.6 KB in 0.36).
+- **Firmware 0.36.0** (`dsp.cpp`): a 180 Hz 4th-order high-pass, then ESP-SR noise suppression in its own task on **core 0** (core 1 runs the echo canceller in a call), with -18 dB of the unsuppressed sound mixed back in (a faint natural room behind the voice). Buffers in PSRAM (4 s each way); the task's 4 KB stack exists only during a session. `mic_record` `ns` 1-3 (mild, medium, aggressive); `mic_done` reports `ns` and `nsDrops`. The mic task now judges speech and turns on the raw sound and sends the filtered sound ~20 ms later (`judge` / `send`), so a conversation could use it without changing its turn timing.
+- **Backend / apps**: a per-speaker setting `noiseFilter`: off, light, medium (default), strong (`PATCH /devices/:uid`; migration `noise_filter`). Calls use it; **Momo hears the raw sound** (the owner found Gemini understood less with the filter). `MIC_NS=0` turns it off on every speaker. The web shows it under Call (saved at once); the app has a Noise filter cell in Speaker setup; the mic test page has a noise filter choice for A/B recordings.
+- **Owner's tests (local)**: medium keeps the voice fullest; strong leaves the fan barely audible but lowers a far voice; light is for quiet rooms. Echo cancellation measured 22-30 dB on the call chime.
+- **"Rain" in quiet-room calls**: short low ticks (~100 Hz, 2 ms, 10-35 a second at -60 dBFS) are in the raw mic signal, in mic tests too (back to 2026-10-15): most likely electrical (Wi-Fi or the supply). They became audible because the noise filter removed the fan that hid them, and the clients add +16 dB. Not caused by the echo canceller or the noise filter (checked on saved call audio). The 180 Hz high-pass removes ~35-40% of them. Real cure: hardware (a capacitor at the mic's supply, short mic wires away from the antenna); the gain step below should also help.
+- **Still to do**: step 4 (speaker gain control together with removing the clients' +16 dB), which should also lift a far voice.
+
+### The plan
 
 Order: high-pass, then AEC, then NS, then AGC, then send. The wake word and the speech detector keep the raw or band signal.
 

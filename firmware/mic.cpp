@@ -6,6 +6,7 @@
 #include "wake.h"
 #include "wakecore.h"
 #include "esp_aec.h"
+#include "dsp.h"
 #include "esp_timer.h"
 
 static const size_t PIECE = SAMPLE_RATE * 12 / 100;  // 120 ms a message (6 Opus frames of 20 ms on the audio link)
@@ -92,6 +93,10 @@ static const unsigned long AFTER_WAKE_MS = 4000;  // the server asks within this
 static aec_handle_t *aec = nullptr;
 static int aecChunk = 0;
 static int16_t *aecIn = nullptr, *aecRef = nullptr, *aecOut = nullptr;
+// Samples on their way to noise suppression (dsp.h), gathered over one pass of the
+// mic task (up to a read plus an echo-cancelled chunk); PSRAM
+static const size_t NS_IN = 1024;
+static int16_t *nsIn = nullptr;
 // (rx - tx) right after each mic read. The two ports' clocks keep it the same
 // while this task keeps up; when the task is late (busy, or the startup rush)
 // it reads old samples and the value comes out lower. So the steady one is the
@@ -179,6 +184,9 @@ static void micTask(void *) {
   double replyOut = 0, replyRaw = 0;  // over this sound: how much the canceller took away (logged)
   double echoOut = 0, echoRaw = 0;    // the same over the whole session (mic_done), and how long
   uint32_t echoMs = 0;
+  bool nsOn = false;          // the sent audio goes through noise suppression (dsp.h) first
+  int nsUsed = 0;             // at which level (mic_done)
+  size_t nsFill = 0;
   float echoPeak = 0;             // the loudest window while playing (x background): for tuning BARGE_X
   uint32_t barges = 0;
   uint32_t turnMs = 0;  // in this turn (waiting, speaking or thinking)
@@ -201,17 +209,30 @@ static void micTask(void *) {
     fill = 0;
   };
 
-  // One sample of the session (and its speech-band value): sent, and judged speech or quiet
-  auto capture = [&](int16_t y, float banded, bool over) {
+  // One sample of the session, sent (with the noise filter on, ~20 ms after it was
+  // judged: the filtered sound goes out, the raw sound decides speech and turns)
+  auto send = [&](int16_t y) {
     if (!total) rxStart = written - 1;
     total++;
-    if (over) clipped++;
     piece[fill++] = y;
     if (fill == PIECE) {
       if (netSendMic((const uint8_t *)piece, sizeof(piece))) pieces++;
       else dropped++;  // not connected: lost, never piled up
       fill = 0;
     }
+    if (s.live || s.conversation) return;
+    levelSum += (int64_t)y * y;
+    levelPeak = max(levelPeak, abs((int32_t)y));
+    if (++levelCount == SAMPLE_RATE / 4) {  // the live level meter, 4 times a second
+      float rms = dbfs(sqrtf((float)levelSum / levelCount)), peak = dbfs(levelPeak);
+      snprintf(json, sizeof(json), "{\"type\":\"mic_level\",\"rms\":%.1f,\"peak\":%.1f}", rms, peak);
+      netSendNow(json);
+      levelSum = levelPeak = levelCount = 0;
+    }
+  };
+
+  // One sample's speech-band value: judged speech or quiet (turns, the end of a request)
+  auto judge = [&](float banded) {
     sessionSum += banded * banded;
     if (++sessionCount == WINDOW) {
       float power = sessionSum / WINDOW;
@@ -286,15 +307,27 @@ static void micTask(void *) {
         }
       } else if (s.endSilenceMs && heard && quietMs >= (uint32_t)s.endSilenceMs) silenceEnded = true;
     }
-    if (s.live || s.conversation) return;
-    levelSum += (int64_t)y * y;
-    levelPeak = max(levelPeak, abs((int32_t)y));
-    if (++levelCount == SAMPLE_RATE / 4) {  // the live level meter, 4 times a second
-      float rms = dbfs(sqrtf((float)levelSum / levelCount)), peak = dbfs(levelPeak);
-      snprintf(json, sizeof(json), "{\"type\":\"mic_level\",\"rms\":%.1f,\"peak\":%.1f}", rms, peak);
-      netSendNow(json);
-      levelSum = levelPeak = levelCount = 0;
+  };
+
+  // One sample of the session (and its speech-band value): judged at once, and
+  // sent at once, or (noise suppression on) after the suppressor, ~20 ms later
+  // through drainNs
+  auto capture = [&](int16_t v, float banded, bool over) {
+    if (over) clipped++;
+    judge(banded);
+    if (!nsOn) return send(v);
+    if (nsFill == NS_IN) {
+      dspPush(nsIn, nsFill);
+      nsFill = 0;
     }
+    nsIn[nsFill++] = v;
+  };
+  auto drainNs = [&]() {
+    if (nsFill) dspPush(nsIn, nsFill);
+    nsFill = 0;
+    int16_t got[256];
+    for (size_t k; (k = dspPull(got, 256));)
+      for (size_t i = 0; i < k; i++) send(got[i]);
   };
 
   for (;;) {
@@ -317,6 +350,12 @@ static void micTask(void *) {
       // Echo cancellation: asked for, a call in full duplex, or in a conversation if
       // interrupting is on (BARGE_IN). Not ready: a call falls back to half duplex
       aecOn = (s.aec || (s.live && s.fd) || (s.conversation && BARGE_IN)) && snapSteady != INT32_MIN && aecReady();
+      // Noise suppression: when asked for (the server asks for calls and microphone
+      // tests; Momo hears the raw sound), never for a wake word recording
+      // (it must sound as the word was said)
+      nsOn = s.ns > 0 && nsIn && !s.wakeTake && !s.wakeTest && dspStart(s.ns);
+      nsUsed = nsOn ? s.ns : 0;
+      nsFill = 0;
       aecFill = 0;
       aecUs = aecChunks = 0;
       echoPeak = 0;
@@ -444,8 +483,16 @@ static void micTask(void *) {
         for (int k = 0; k < aecChunk; k++) capture(aecOut[k], aecBand.push(aecOut[k]), false);
       }
     }
+    if (nsOn) drainNs();
 
     if (on && (stopAsked || silenceEnded || idleEnded || total >= want)) {
+      if (nsOn) {  // the last of it through the suppressor first
+        if (nsFill) dspPush(nsIn, nsFill);
+        nsFill = 0;
+        dspStop();
+        drainNs();
+        nsOn = false;
+      }
       if (fill) {  // the last, shorter piece
         if (netSendMic((const uint8_t *)piece, fill * 2)) pieces++;
         else dropped++;
@@ -476,6 +523,9 @@ static void micTask(void *) {
                           echoOut > 0 ? 10 * log10(echoRaw / echoOut) : 0.0, (unsigned long)echoMs,
                           (unsigned long)(aecChunks ? aecUs / aecChunks : 0));
       }
+      if (nsUsed)  // noise suppression: its level, and 10 ms frames lost on the way
+        len += snprintf(json + len, sizeof(json) - len - 2, ",\"ns\":%d,\"nsDrops\":%lu", nsUsed,
+                        (unsigned long)dspDrops());
       snprintf(json + len, sizeof(json) - len, "}");
       netSend(json);
       Serial.printf("Microphone session over (%s): %lu samples, %lu clipped\n", endedBy, (unsigned long)total,
@@ -491,6 +541,7 @@ static void micTask(void *) {
 
 void micSetup() {
   aecReady();  // now, not on first use: making it takes ~2 s (the mic would lose that much)
+  nsIn = (int16_t *)heap_caps_malloc(NS_IN * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   ring = (int16_t *)heap_caps_malloc(RING * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   bandRing = (float *)heap_caps_malloc(RING * sizeof(float), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!bandRing) ring = nullptr;  // both or neither
@@ -519,6 +570,7 @@ bool micRecord(const MicSession &s) {
   asked.seconds = constrain(s.seconds, 1, s.live || s.conversation ? MIC_LIVE_MAX_S : MIC_TEST_MAX_S);
   asked.endSilenceMs = s.live ? 0 : constrain(s.endSilenceMs, 0, 5000);
   asked.idleMs = constrain(s.idleMs, 0, 60000);
+  asked.ns = constrain(s.ns, 0, 3);
   toneStop();               // a quiet room: nothing plays while it listens…
   if (!s.live) talkStop();  // …except, in a call, the caller
   // A call: "connected" (three rising notes; falling when it ends). A voice

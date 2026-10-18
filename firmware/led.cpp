@@ -43,7 +43,8 @@ static Look pick(unsigned long now) {
   if (otaRunning()) look = UPDATING;
   else if (micBusy()) {  // always shown while the mic is on (privacy)
     MicState m = micState();
-    look = isTalking() ? TALKING : m == MIC_THINKING ? THINKING : LISTENING;
+    // A call stays pink from start to end, whether or not the caller is talking
+    look = micInCall() ? LISTENING : isTalking() ? TALKING : m == MIC_THINKING ? THINKING : LISTENING;
   }
   else if ((long)(identifyUntil - now) > 0) look = IDENTIFY;
   else if (isMusic()) look = MUSIC;

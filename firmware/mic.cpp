@@ -481,6 +481,7 @@ static void micTask(void *) {
       Serial.printf("Microphone session over (%s): %lu samples, %lu clipped\n", endedBy, (unsigned long)total,
                     (unsigned long)clipped);
       if (s.conversation && !(stopAsked && stopQuiet)) cueStart(true);  // "that's all"
+      else if (s.live) callCueStart(true);                               // the call ended, however
       on = false;
       turn = WAITING;
       running = false;
@@ -520,10 +521,12 @@ bool micRecord(const MicSession &s) {
   asked.idleMs = constrain(s.idleMs, 0, 60000);
   toneStop();               // a quiet room: nothing plays while it listens…
   if (!s.live) talkStop();  // …except, in a call, the caller
-  // "I'm listening", or for a call "the room can be heard now" (no beep after
-  // the wake word: it sends from the word on, and the server answers if it was)
+  // A call: "connected" (three rising notes; falling when it ends). A voice
+  // request: "I'm listening" (no beep after the wake word: it sends from the
+  // word on, and the server answers if it was)
   asked.afterWake = s.afterWake && wakeFresh();
-  if ((asked.endSilenceMs || s.live) && !asked.afterWake) cueStart();
+  if (s.live) callCueStart();  // a call connected (its own sound)
+  else if (asked.endSilenceMs && !asked.afterWake) cueStart();
   if (s.echoTest) sweepStart();  // plays while it records
   stopAsked = false;
   stopQuiet = false;
@@ -542,6 +545,7 @@ void micStop(bool quiet) {
 }
 
 bool micBusy() { return running; }
+bool micInCall() { return running && asked.live; }
 
 void micTurnAgain() { againAsked = true; }
 

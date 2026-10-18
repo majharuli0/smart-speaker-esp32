@@ -211,10 +211,13 @@ static void pumpSweep() {
   if (sweepSample >= SWEEP_SAMPLES) sweeping = false;
 }
 
+static void chimeBuild();  // the call's chime, worked out once (see pumpCue)
+
 void audioSetup() {
   i2sSetup();
   playRing = (int16_t *)heap_caps_malloc(PLAY_RING * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   refRing = (int16_t *)heap_caps_malloc(REF_RING * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  chimeBuild();
   // Core 1, above the mic task: the amp must never wait
   xTaskCreatePinnedToCore(outputTask, "audio out", 4096, nullptr, 5, nullptr, 1);
   prefs.begin("audio");
@@ -406,6 +409,17 @@ void talkPush(const uint8_t *data, size_t len) {
 
 static void pumpTalk() {
   if (!talking) return;
+  // A cue is playing (a call connecting): talk waits, or the two would take turns
+  // block by block and garble each other. Only its latest 125 ms is kept, so it
+  // doesn't start behind.
+  if (cueing) {
+    if (talkCount > TALK_PREBUFFER) {
+      size_t skip = talkCount - TALK_PREBUFFER;
+      talkHead = (talkHead + skip) % TALK_BUF_SAMPLES;
+      talkCount -= skip;
+    }
+    return;
+  }
   if (!talkPlaying) {
     if (talkCount < TALK_PREBUFFER && !talkEnding) return;
     talkPlaying = true;
@@ -465,24 +479,73 @@ static void pumpChime() {
 
 // Two short rising notes (A5, then E6), 0.26 s: the speaker is about to listen.
 // Falling (E6, then A5): the conversation is over. Built in, so it plays at once.
-void cueStart(bool falling) {
+// A call has its own: a gentle chime when it connects (C5, E5, G5, soft and
+// low, each ringing out; twice, 2.6 s: never startling for an elderly person),
+// and three falling notes (G6, E6, C6) when it ends.
+static const float LISTEN_NOTES[] = {880.0f, 1318.5f};
+static const float CALL_NOTES[] = {1046.5f, 1318.5f, 1568.0f};
+static const float *cueNotes = LISTEN_NOTES;
+static int cueCount = 2;
+static float cueNote = 0.13f;  // each note's length in s (its last 10 ms silent)
+static bool cueRinging = false;  // the call's chime instead of notes
+// The chime: when each note starts (s) and its pitch; each fades in over 40 ms
+// and dies away slowly, overlapping the next
+static const float CHIME_AT[] = {0.0f, 0.35f, 0.7f, 1.4f, 1.75f, 2.1f};
+static const float CHIME_HZ[] = {523.25f, 659.25f, 783.99f, 523.25f, 659.25f, 783.99f};
+static const float CHIME_LENGTH = 2.6f;  // s, by when the last note has nearly faded
+static const uint32_t CHIME_SAMPLES = (uint32_t)(SAMPLE_RATE * CHIME_LENGTH);
+// Worked out once at startup (PSRAM, 83 KB): six notes per sample in real time
+// was too slow next to the echo canceller in a call, and played choppy
+static int16_t *chime = nullptr;
+
+static void chimeBuild() {
+  chime = (int16_t *)heap_caps_malloc(CHIME_SAMPLES * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!chime) return;  // a call then starts with the short three notes instead
+  for (uint32_t j = 0; j < CHIME_SAMPLES; j++) {
+    float t = (float)j / SAMPLE_RATE, v = 0;
+    for (int k = 0; k < 6; k++) {
+      float local = t - CHIME_AT[k];
+      if (local < 0) break;
+      v += sinf(2 * PI * CHIME_HZ[k] * local) * min(1.0f, local * 25) * expf(-2.5f * local);
+    }
+    float fadeOut = min(1.0f, (CHIME_LENGTH - t) * 5);  // the last 200 ms down to nothing
+    chime[j] = (int16_t)(v * max(0.0f, fadeOut) * 5000);
+  }
+}
+
+static void cueBegin(const float *notes, int count, float note, bool falling) {
   chiming = false;
+  cueNotes = notes;
+  cueCount = count;
+  cueNote = note;
   cueFalling = falling;
+  cueRinging = false;
   cueing = true;
   cueSample = 0;
 }
 
+void cueStart(bool falling) { cueBegin(LISTEN_NOTES, 2, 0.13f, falling); }
+
+void callCueStart(bool ending) {
+  cueBegin(CALL_NOTES, 3, 0.15f, true);
+  cueRinging = !ending && chime;
+}
+
 static void pumpCue() {
   if (!cueing) return;
-  const uint32_t length = SAMPLE_RATE * 26 / 100;
+  const uint32_t length = cueRinging ? CHIME_SAMPLES : (uint32_t)(SAMPLE_RATE * cueNote * cueCount);
   int16_t mono[256];
   for (int i = 0; i < 256; i++, cueSample++) {
+    if (cueRinging) {
+      mono[i] = cueSample < length ? chime[cueSample] : 0;
+      continue;
+    }
     float t = (float)cueSample / SAMPLE_RATE;
-    bool second = t >= 0.13f;
-    float local = second ? t - 0.13f : t;  // time into this note
-    float env = cueSample >= length || (t >= 0.12f && t < 0.13f) ? 0 : min(1.0f, local * 200) * expf(-12 * local);
-    bool high = second != cueFalling;
-    mono[i] = (int16_t)(sinf(2 * PI * (high ? 1318.5f : 880.0f) * t) * env * 12000);
+    int n = min((int)(t / cueNote), cueCount - 1);
+    float local = t - n * cueNote;  // time into this note
+    float env = cueSample >= length || local >= cueNote - 0.01f ? 0 : min(1.0f, local * 200) * expf(-12 * local);
+    float hz = cueNotes[cueFalling ? cueCount - 1 - n : n];
+    mono[i] = (int16_t)(sinf(2 * PI * hz * t) * env * 12000);
   }
   playSamples(mono, 256);
   if (cueSample >= length) {

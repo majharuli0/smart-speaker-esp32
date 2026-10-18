@@ -26,6 +26,7 @@ void chimeStart();
 // "I'm listening": two short rising notes, before the mic opens for a voice request.
 // falling: the same notes down, "the conversation is over".
 void cueStart(bool falling = false);
+void callCueStart(bool ending = false);  // a call connected (three rising notes) or ended (falling)
 
 // Live talk from the browser (16 kHz 16-bit mono PCM)
 void talkStart();

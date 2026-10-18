@@ -1,8 +1,8 @@
 # Audio plan: reliable, lower-delay, full-duplex two-way voice (and a cleaner mic)
 
-Status (2026-10-18, evening): Phases 0 and 1 done, tested, merged to main and deployed to the cloud, plus a round of Momo fixes (see "Momo fixes" below). Next: Phase 2 (full-duplex calls). Work happens on branch `feat/audio-duplex` in all four repos; each tested step is fast-forwarded into main and pushed.
+Status (2026-10-19): Phases 0, 1 and 2 done and tested by the owner, plus two rounds of Momo fixes; Phase 2 also merged "hear the room" and "talk" into one Call in the web and the app. Next: Phase 3 (cleaner mic: the owner's fan is audible in calls now that the room is heard all the time). Work happens on branch `feat/audio-duplex` in all four repos; each tested step is fast-forwarded into main and pushed.
 
-Deployed on the cloud: backend `8101c34`, web `5856910`, speaker firmware 0.34.0 (flashed over USB with the cloud `secrets.h`). App `5b95393` (built by the owner on the Mac).
+Deployed on the cloud 2026-10-19: Phase 2 and the Bangla/English prompt fix, speaker firmware 0.35.1 (flashed over USB with the cloud `secrets.h`); exact commits in the deploy notes of NEXT_STEPS.md. The app is built by the owner on the Mac.
 
 **How we work on this (keep to it):**
 - One phase or fix at a time; the owner tests each locally or on the cloud before the next. Don't start the next phase without them.
@@ -110,9 +110,28 @@ Tests: the e2e suite had been failing since the held-turn change and was not run
 1. A false wake at 16:33 UTC was answered in Spanish ("Hola, estoy muy bien…") instead of `not_for_me`. Tighten Momo's prompt: Bangla only, and silence for anything after a wake that isn't clearly addressed to it.
 2. Stray single words ("A") still sometimes get "জি, কিছু বলবেন?". Left for the local model the ML engineer is training.
 3. One conversation ended `unavailable` at 16:07 UTC (Gemini unreachable); its logs were lost with the container. Watch for it.
-4. The speaker's `underruns` counter fix (count only while talk is on) is in firmware 0.33.0+; the latency probe should be re-run to measure Phase 1 (`POST /api/v1/devices/:id/latency-probe`).
+4. The speaker's `underruns` counter fix (count only while talk is on) is in firmware 0.33.0+.
+
+Done 2026-10-18: item 1. Momo's prompt now opens with the wake check, takes only Bangla or English as meant for it (anything else: `not_for_me` after a wake, `ignore_noise` later), and always answers in Bangla. Tested locally by the owner.
+
+### Open after Phase 2
+
+1. **Latency probe broken** on 0.34.0+: all five runs `null`, and the link counters showed `talkOut: 0` (no click went out on the link). Not investigated (the owner moved on); Phase 1's round trip is still unmeasured against the 255 ms baseline.
+2. **`outboxDrops` 100** on the speaker in one local session (12 s of mic audio the link couldn't take; Phase 0 had 48). One link drop in that time may explain it; cause not confirmed.
+3. **Echo not measured against the 25 dB target.** The owner's real call sounded right ("working well"), but the speaker's own figure read 2.7-6.9 dB: it counts every moment the talk channel is open (silence included) and the room's own voice during double talk, so it understates. Fix the meter (count only windows where the speaker's sound is clearly there) and run the sweep echo test at volume 40/70/100 before tuning anything.
 
 ## Phase 2: full-duplex calls
+
+### Phase 2 results (2026-10-18/19, done)
+
+- Firmware 0.35.0: `fd` in `mic_record` turns the ESP-SR echo canceller on for a call, and the room keeps flowing while the speaker plays the caller; half duplex if the canceller isn't ready (`mic_done.fd` says which, with `aec.echoDb/echoMs/usPerChunk`). Barge-in thresholds only in conversations; the wake word stays gated. `ns`/`agc` were left for Phase 3.
+- Backend: `listen_start` sends `fd` unless `CALL_DUPLEX=0`; one log line per call ("call over …; full duplex, echo X dB down …").
+- One **Call** in the web and the app instead of hold/tap to talk and hear the room: it hears the room and talks at once; **Mute** stops the talk (talk_stop: the speaker is free again, its wake word listens); **End** stops both; leaving the page ends it. The app's doorbell/incoming-call screen starts a call muted; the web's "is calling you" Answer starts it from the click. A call is one entry in Recent calls however often it's muted (`socket.data.callLogged`).
+- Firmware 0.35.1, the speaker side of a call: a soft chime when it connects (C5-E5-G5 twice, 2.6 s, quiet; worked out once at boot into PSRAM, since six notes per sample live was too slow next to the echo canceller and played choppy), three falling notes when it ends (however it ends), and a steady pink light for the whole call. Talk waits while a cue plays (they used to take turns block by block and garble), keeping only its latest 125 ms.
+- Owner's tests (local): call "working well"; fan noise audible (Phase 3); a trill ring was too sharp for an elderly person, replaced by the chime.
+- Not done from the plan: step 6 (tuning at volume 40/70/100 with the sweep test) and step 7 (residual guard): see "Open after Phase 2", item 3.
+
+### The plan
 
 Firmware:
 1. `MicSession` (`mic.h`) and `firmware.ino:74`: add `fd` (bool), `ns` (0-3), `agc` (bool). Parse `doc["fd"]|false`, `doc["ns"]|0`, `doc["agc"]|false`.

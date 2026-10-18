@@ -2,7 +2,7 @@
 
 Status (2026-10-19): Phases 0, 1 and 2 done and tested by the owner, plus two rounds of Momo fixes; Phase 2 also merged "hear the room" and "talk" into one Call in the web and the app. Next: Phase 3 (cleaner mic: the owner's fan is audible in calls now that the room is heard all the time). Work happens on branch `feat/audio-duplex` in all four repos; each tested step is fast-forwarded into main and pushed.
 
-Deployed on the cloud 2026-10-19: Phase 2 and the Bangla/English prompt fix, speaker firmware 0.35.1 (flashed over USB with the cloud `secrets.h`); exact commits in the deploy notes of NEXT_STEPS.md. The app is built by the owner on the Mac.
+Deployed on the cloud 2026-10-19: Phase 2 and the Bangla/English prompt fix, speaker firmware 0.35.1 (flashed over USB with the cloud `secrets.h`); backend `380e6d4`, web `c2dd8c4`, app `7562b46` (main), firmware from `e3ca1a9`. Backup first: `~/backups/speaker-20261018-183127.*`. The app is built by the owner on the Mac.
 
 **How we work on this (keep to it):**
 - One phase or fix at a time; the owner tests each locally or on the cloud before the next. Don't start the next phase without them.

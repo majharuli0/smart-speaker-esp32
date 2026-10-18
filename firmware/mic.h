@@ -13,7 +13,7 @@
 struct MicSession {
   int seconds;       // at most this long
   int endSilenceMs;  // a voice request: ends once someone has spoken and then been quiet this long
-  bool live;         // the room for a call: the speaker keeps talking; nothing is sent while it does
+  bool live;         // the room for a call: the speaker keeps talking; nothing is sent while it does (unless fd)
   int wakeTake;      // 1-3: this recording is that take of the wake word
   bool wakeTest;     // this recording is scored against the takes
   bool afterWake;    // after the wake word: from where the word started
@@ -21,6 +21,7 @@ struct MicSession {
   int idleMs;        // a conversation ends when the person says nothing this long on their turn
   bool echoTest;     // plays a sweep while recording; mic_done tells where both started (rx/tx sample numbers)
   bool aec;          // the recording goes through echo cancellation (ESP-SR) first (being measured)
+  bool fd;           // a call in full duplex: echo cancelled, and the room is sent while the speaker plays too
 };
 
 enum MicState { MIC_OFF, MIC_LISTENING, MIC_THINKING };

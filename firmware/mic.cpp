@@ -177,6 +177,8 @@ static void micTask(void *) {
   float outWin[BARGE_RUN] = {}, rawWin[BARGE_RUN] = {};  // the last windows over the speaker: cancelled, and not
   uint32_t playMs = 0;            // how long the speaker has been playing
   double replyOut = 0, replyRaw = 0;  // over this sound: how much the canceller took away (logged)
+  double echoOut = 0, echoRaw = 0;    // the same over the whole session (mic_done), and how long
+  uint32_t echoMs = 0;
   float echoPeak = 0;             // the loudest window while playing (x background): for tuning BARGE_X
   uint32_t barges = 0;
   uint32_t turnMs = 0;  // in this turn (waiting, speaking or thinking)
@@ -216,10 +218,11 @@ static void micTask(void *) {
       sessionSum = 0;
       sessionCount = 0;
       float fl = floor;
-      bool strict = aecOn && playing;  // over the speaker's own sound
+      bool echoing = aecOn && playing;        // cancelling the speaker's own sound (measured)
+      bool strict = echoing && s.conversation;  // and someone speaking over it would interrupt it
       float x = strict ? BARGE_X : 1;
       float kept = 1;  // over the last BARGE_RUN windows: the cancelled audio / the mic's
-      if (strict) {
+      if (echoing) {
         if (fl > 0 && power / fl > echoPeak) echoPeak = power / fl;
         float o = 0, r = 0;
         for (uint32_t k = BARGE_RUN - 1; k > 0; k--) {
@@ -236,6 +239,9 @@ static void micTask(void *) {
         playMs += 50;
         replyOut += power;
         replyRaw += rawPower;
+        echoOut += power;
+        echoRaw += rawPower;
+        echoMs += 50;
       } else if (playMs) {
         if (replyOut > 0)
           Serial.printf("Echo cancellation: %.1f dB taken away over %lu ms of sound\n", 10 * log10(replyRaw / replyOut),
@@ -308,11 +314,14 @@ static void micTask(void *) {
       turnMs = 0;
       idleEnded = false;
       wakeSessionStart(s.wakeTake, s.wakeTest);
-      // Echo cancellation: asked for, or in a conversation if interrupting is on (BARGE_IN)
-      aecOn = (s.aec || (s.conversation && BARGE_IN)) && snapSteady != INT32_MIN && aecReady();
+      // Echo cancellation: asked for, a call in full duplex, or in a conversation if
+      // interrupting is on (BARGE_IN). Not ready: a call falls back to half duplex
+      aecOn = (s.aec || (s.live && s.fd) || (s.conversation && BARGE_IN)) && snapSteady != INT32_MIN && aecReady();
       aecFill = 0;
       aecUs = aecChunks = 0;
       echoPeak = 0;
+      echoOut = echoRaw = 0;
+      echoMs = 0;
       barges = 0;
       bargeIn = false;
       // Straight after the wake word: from where it ended, at once
@@ -410,9 +419,10 @@ static void micTask(void *) {
         if (!playing) floor = floor < 0 || power < floor ? power : floor * 1.023f;  // the room's, not the speaker's
       }
       if (!on || !capturing || silenceEnded || idleEnded || total >= want) continue;
-      // The caller's or the AI's voice is playing: send nothing (with echo
-      // cancellation a conversation goes on: the person may speak over it)
-      if ((s.live || (s.conversation && !aecOn)) && !echoFree) {
+      // The caller's or the AI's voice is playing: send nothing, unless it's being
+      // cancelled (a call in full duplex: the room goes on; a conversation with
+      // BARGE_IN: the person may speak over it)
+      if ((s.live || s.conversation) && !aecOn && !echoFree) {
         total++;
         continue;
       }
@@ -459,6 +469,13 @@ static void micTask(void *) {
         len += snprintf(json + len, sizeof(json) - len - 2,
                         ",\"aec\":{\"barges\":%lu,\"echoPeakDb\":%.1f,\"usPerChunk\":%lu}", (unsigned long)barges,
                         echoPeak > 0 ? 10 * log10f(echoPeak) : 0.0f, (unsigned long)(aecChunks ? aecUs / aecChunks : 0));
+      if (s.live) {  // a call: full duplex or not, and how much of the speaker's sound was taken away
+        len += snprintf(json + len, sizeof(json) - len - 2, ",\"fd\":%s", aecOn ? "true" : "false");
+        if (aecOn)
+          len += snprintf(json + len, sizeof(json) - len - 2, ",\"aec\":{\"echoDb\":%.1f,\"echoMs\":%lu,\"usPerChunk\":%lu}",
+                          echoOut > 0 ? 10 * log10(echoRaw / echoOut) : 0.0, (unsigned long)echoMs,
+                          (unsigned long)(aecChunks ? aecUs / aecChunks : 0));
+      }
       snprintf(json + len, sizeof(json) - len, "}");
       netSend(json);
       Serial.printf("Microphone session over (%s): %lu samples, %lu clipped\n", endedBy, (unsigned long)total,
@@ -512,7 +529,8 @@ bool micRecord(const MicSession &s) {
   stopQuiet = false;
   running = true;
   askedNew = true;
-  Serial.printf("Microphone session: up to %d s%s%s\n", asked.seconds, s.live ? ", a call" : "",
+  Serial.printf("Microphone session: up to %d s%s%s\n", asked.seconds,
+                s.live ? (s.fd ? ", a call (full duplex asked)" : ", a call") : "",
                 asked.endSilenceMs ? ", until the room is quiet again" : "");
   return true;
 }

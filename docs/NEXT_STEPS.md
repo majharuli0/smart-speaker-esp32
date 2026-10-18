@@ -4,6 +4,8 @@ Read this file first in a new chat. It covers what is live, how we work, what we
 
 **To start a new chat, say:** *"Read `led-demo/docs/NEXT_STEPS.md` and start with step 2, block B4. Check with me on scope first."* (B4 = Momo remembers: notes and preferences per speaker. Then step 3. B5, the context Momo and routines know, is built: see "B5 progress".)
 
+**2026-10-18: the audio plan (current work).** Two-way voice was reworked in phases: see [AUDIO_PLAN.md](AUDIO_PLAN.md), which has the status, the measurements and what's next. Done, tested and deployed (backend `8101c34`, web `5856910`, firmware 0.34.0, app `5b95393`; backup `~/backups/speaker-20261018-161749.*`): audio counters and a latency probe (phase 0); lower delay, faster dead-link detection and a link watchdog (phase 1, which also settles step 1's items 2 "a bit of delay" and the audio link that didn't come back); and Momo fixes (no repeated answers, no answers cut by noise, bulk alarm actions, the speaker's confirmation of alarm changes, the 20-alarm limit). Next: phase 2, full-duplex calls. All four repos work on branch `feat/audio-duplex`, fast-forwarded into `main` after each tested step.
+
 **Deployed 2026-10-17 14:15-14:18 UTC: Momo memory fix** (backend `42981af`, `f6dd497`; backup `~/backups/speaker-20261017-141514.*`). Found by the owner: item places were saved without the thing ("ড্রয়ারের ভিতর"), so "চশমা কোথায়?" offered every place. Now the note always names the thing ("চশমা: ড্রয়ারের ভিতর"), a place without a thing is refused, and words match in either encoding of য়. The two cloud notes were renamed by hand (চশমা, মানিব্যাগ, from the voice log).
 
 **Deployed to the cloud 2026-10-17 (12:35-12:40 UTC):** backend `9cc1be6` (includes `98bdb35`, wake check), web `501f085`, firmware 0.31.1 (`led-demo` `691a013`, flashed over USB). Backups: `~/backups/speaker-20261017-123558.*`. New: **DS3231 battery clock** (GPIO 21/47; boot events carry `clock: "rtc"`, verified in the cloud database; Health shows "Battery clock working") and **12-hour times on the web** (AM/PM picker for alarms, routines and care routines). Still to test by the owner: an alarm with the router off after a power cut. The phone app already shows 12-hour times; only its care-routine time box asks for 24-hour input ("08:30", `app/care.tsx`).
@@ -183,7 +185,7 @@ Three loose ends from the deploy. One test session with the owner covers all thr
    - Record the serial log (no reset) while the owner uses Hear the room for 2–3 minutes. Look for `rst:`, `Guru`, `abort`, "audio link down".
    - Also check the free internal RAM in the stats module during a listen session.
    - If it's a crash, fix the cause. If it's the link, check the heartbeat (20 s ping) and the `MAX_BUFFERED` (64 KB) close.
-2. **"A bit of delay" on live audio.** Ask the owner which direction is late, and by how much.
+2. **"A bit of delay" on live audio.** ✅ Addressed by the audio plan, phase 1 (2026-10-18): `PLAY_RING` 1024, a 125 ms prebuffer, no 125 ms batching on the audio link, a catching-up player in the apps; the link watchdog covers the link that didn't come back. See [AUDIO_PLAN.md](AUDIO_PLAN.md). Ask the owner which direction is late, and by how much.
    - Expected total is about 0.4–0.6 s.
    - **Easy win:** 0.29 added a 128 ms play ring plus 4 DMA buffers, about 64 ms more output delay. Try `PLAY_RING` 1024 in `audio.cpp` and check for underruns.
    - Other knobs: `TALK_PREBUFFER` (190 ms) in `config.h`; mic pieces of 120 ms (`PIECE` in `mic.cpp`); the app's playback buffer.

@@ -2,7 +2,7 @@
 
 How the ESP32 and the server talk to each other (over MQTT, through our broker). This is the single reference for the device side: if code and this file disagree, fix one of them.
 
-**Version:** matches firmware `0.13.0` and `smart-speaker-backend`.
+**Version:** matches firmware `0.13.0` and `smart-speaker-backend`; the audio sections (1b `mic`, 3.5 `turn_again`, 3.6 `turn`, 4, 4b, 6.1 `audio`) are updated to firmware `0.34.0` (2026-10-18). Audio work and its reasons: [AUDIO_PLAN.md](AUDIO_PLAN.md).
 
 > The web page and phone app no longer talk to devices through a WebSocket: they use the backend's REST API and Socket.IO (see the `smart-speaker-backend` README and its Swagger docs at `/api/docs`). The device messages below are unchanged; where a section mentions the browser or `target`, the backend now sends that message on the user's behalf, after checking they own the device.
 
@@ -38,7 +38,7 @@ Devices connect to the **MQTT broker**, not to the server. Since firmware 0.13.0
 | `ss/dev/<id>/audio` | server → device | 0 | Talk audio (section 4) |
 | `ss/dev/<id>/evt` | device → server | 1 | Everything the device sends: `hello`, 3.6, `boot` |
 | `ss/dev/<id>/online` | device | 1, retained | `1` on connect; the broker publishes `0` if the device drops (last will) |
-| `ss/dev/<id>/mic` | device → server | 0 | Microphone audio (firmware 0.19.0+): 16 kHz 16-bit mono PCM in 125 ms pieces (4,000 bytes), only while a `mic_record` runs. The mic is always on from 0.22.0 (for the wake word), but nothing is sent outside a `mic_record` |
+| `ss/dev/<id>/mic` | device → server | 0 | Microphone audio (firmware 0.19.0+): 16 kHz 16-bit mono PCM in 120 ms pieces (3,840 bytes; 125 ms before 0.28), only while a `mic_record` runs. The mic is always on from 0.22.0 (for the wake word), but nothing is sent outside a `mic_record`. Since 0.28.0 this topic is only the fallback: mic audio goes over the audio link (section 4b) while it's up |
 | `ss/server/online` | server | 1, retained | `1` when up (`0` is its last will). On `1`, a device sends `hello` and its reports again. **Known gap:** the server only counts a device as online after its `hello`. If a device's `hello` arrives while the server's MQTT login is still being refused (a quick restart of the dev server), it is missed, and the device won't say hello again because `ss/server/online` was already `1`. Fix by hand: publish `0`, then `1` (retained) to `ss/server/online`, or restart the backend once more. |
 | `ss/server/http` | server | 1, retained | Base URL for downloads (tones, firmware), e.g. `http://192.168.0.102:3000`; `PUBLIC_URL` overrides it |
 
@@ -137,6 +137,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `mic_record` with **`conversation: true, endSilence, idle`** | A conversation (0.26.0+): streams like a call (nothing sent while the speaker plays), and keeps the turns: `turn` events when the person starts and stops speaking (a turn ends after `endSilence` ms of quiet), a rising beep and pink light when it's their turn again after the AI's voice has played, blue while the AI thinks, purple while it speaks. Ends by itself (falling tone, `endedBy: "idle"`) when they say nothing for `idle` ms on their turn. With `afterWake: true` it starts from the start of the wake word, without a beep |
 | `{type:"wake_config", enabled, sensitivity}` | Wake word on/off and sensitivity 1–10 (higher wakes more easily). Sent by the server after `hello` and on change; the device keeps it. Firmware 0.22.0+ |
 | `{type:"wake_clear"}` | Forget the wake word takes (0.22.0+) |
+| `{type:"turn_again"}` | In a conversation (0.34.0+): the server set the person's last turn aside (too little sound in it, or Momo called it noise), so it's their turn again: the light goes back from blue to listening, with no beep. Older firmware ignores it and stays "thinking" until its 12 s limit |
 
 ### 3.6 Device → browsers (relayed to all browsers, with `deviceId` added)
 
@@ -157,7 +158,7 @@ The server forwards any other browser message to the device named in `target`. I
 | `{type:"mic_level", rms, peak}` | Every 250 ms during a microphone test: levels in dB of full scale (0 = as loud as it goes), for a live meter. Sent at once (QoS 0), like the audio: the queue for other reports goes out about one message per pass of the MQTT task, far too slow for live data |
 | `{type:"wake_status", enabled, sensitivity, takes:[s,s,s], threshold, spread, listening}` | The wake word (0.22.0+): each take's length in seconds (0 = none), the match threshold and the takes' average distance from each other, and whether it's listening (on, with all 3 takes). On connect and on every change |
 | `{type:"wake", score, threshold}` | The wake word was heard (score ≤ threshold; lower is closer). Not again for 3 s. The server starts a conversation as the owner (0.25.0+: the match is loose on purpose, and the AI checks the recording really starts with the wake phrase; if not, the speaker stays silent) |
-| `{type:"turn", state:"speaking"\|"done", pieces}` | In a conversation (0.26.0+), sent at once: the person started / stopped speaking. `pieces`: how many `mic` pieces were sent before it, so the server can include the start (and wait for the end) of the turn |
+| `{type:"turn", state:"speaking"\|"done", pieces, speech?}` | In a conversation (0.26.0+), sent at once: the person started / stopped speaking. `pieces`: how many `mic` pieces were sent before it, so the server can include the start (and wait for the end) of the turn. `speech` (0.34.0+, on `done` only): how long they spoke in ms, the turn less the quiet that ended it. The server holds a turn until `done` and sets aside one with under 200 ms of sound (it answers `turn_again`) |
 | `{type:"mic_done", samples, pieces, dropped, clipped, slot, gainShift, speech, endedBy, floorDb, wake?}` | The recording ended (`endedBy`: `silence`, `time` or `stop`; `speech`: someone spoke): samples recorded, pieces sent, pieces that couldn't be sent (not connected), samples clipped, which I2S slot the mic answered in (`left`/`right`, its L/R pin), and the gain (`MIC_GAIN_SHIFT`: 8 = x1). `{type:"mic_done", error}` if the mic's I2S port didn't start. `wake` (0.22.0+): for a take `{take, ok, seconds?}`; for a test `{test, heard, seconds?, score (null: too long or short to compare), threshold, match}` |
 
 ---
@@ -169,17 +170,31 @@ browser: talk_start → binary chunk, chunk, ... → talk_stop
 ```
 - **Format:** raw PCM, 16 kHz, 16-bit signed little-endian, mono. The browser sends **640-byte chunks** (320 samples = 20 ms) over its live connection.
 - **Routing:** the server forwards a browser's audio only to its current talk target, and only between `talk_start` and `talk_stop`. Everything else is dropped.
-- **Pieces of 125 ms:** the server joins the chunks and publishes one message every 125 ms (4,000 bytes, 8 messages a second). EMQX Serverless allows a client only **10 published messages a second**: one message per 20 ms chunk (50 a second) was queued by the broker and fell seconds behind. Any command for the device first sends the audio still waiting, so `talk_stop` always comes after the last words.
+- **Over the audio link (section 4b), as it comes:** each chunk goes on at once (Opus, in 20 ms frames). The AI's voice goes in 40 ms pieces, paced to play time, 240 ms ahead.
+- **Over MQTT (the fallback), in pieces of 125 ms:** the server joins the chunks and publishes one message every 125 ms (4,000 bytes, 8 messages a second). EMQX Serverless allowed a client only **10 published messages a second**: one message per 20 ms chunk (50 a second) was queued by the broker and fell seconds behind. The AI's voice goes 375 ms ahead. Any command for the device first sends the audio still waiting, so `talk_stop` always comes after the last words.
 - **No late audio:** the browser sends chunks as "volatile" (dropped if the connection is busy), and audio is QoS 0 (never resent).
-- **Device** (firmware 0.11.2+):
-  - Holds a 16,000-sample buffer (1 s). It starts playing once 3,000 samples (~190 ms, two pieces) are buffered, and drops the oldest audio when the buffer is full.
+- **Device** (firmware 0.11.2+; numbers from 0.33.0):
+  - Holds a 16,000-sample buffer (1 s). It starts playing once 2,000 samples (125 ms) are buffered (3,000 before 0.33), and drops the oldest audio when the buffer is full.
+  - If more than 500 ms is waiting while it plays (a burst after a stall), it skips back to 250 ms, so the delay doesn't stay raised (counted as `talkSkips`).
   - If no audio arrives for 150 ms, it waits for the buffer to build up again before resuming.
+  - Played audio then waits in a 64 ms ring (128 ms before 0.33) and the amp's 64 ms queue.
   - On `talk_stop` it plays what's left in the buffer, then stops.
 - **Priority:** an alarm, or a `ring` from the **Test tone** button, stops talk.
 - The mic only works on `https://` or `http://localhost`, a browser rule.
 - **A call, the other way** (0.22.0+): the page sends `listen_start {deviceId}` over its live connection (any family member; answers `{ok, reason}`), the server sends the device `mic_record {seconds: 600, live: true}`, and passes each 125 ms piece on as binary `listen_audio`. `listen_stop`, closing the page, or the device stopping (`listen_end {deviceId}`) end it. Talk works at the same time; the device sends nothing while it plays the caller's voice.
 
 ---
+
+## 4b. Audio link (firmware 0.28.0+)
+
+Live audio both ways goes over its own WebSocket, not through the broker: talk and the AI's voice down, the mic up. Commands and reports stay on MQTT.
+
+- **Where:** the server announces the URL in the retained topic `ss/server/audio`: `AUDIO_LINK_URL` in the backend's `.env` (cloud: `wss://smart-speaker.duckdns.org/api/audio-link`, through Caddy), else `ws://<its LAN address>:4000/api/audio-link`.
+- **Login:** the first text frame is `{"type":"hello","id":"esp32-…","password":"<its MQTT password>","codec":"opus"}`; the server answers `{"type":"ok"}` within 5 s, or closes. Without `"codec":"opus"` the link carries raw PCM.
+- **Binary frames:** `[type: 1 byte][seq: 2 bytes, big-endian][payload]`. Types: `0x01` mic Opus, `0x02` talk Opus, `0x03` mic PCM, `0x04` talk PCM. An Opus payload is a run of 20 ms frames, each `[length: 2 bytes, big-endian][frame]` (16 kHz mono, VOIP, 24 kb/s; the speaker encodes at complexity 2). A mic message is one 120 ms piece (6 frames). The speaker decodes at most 16 frames (320 ms) of one talk message. Each side numbers its frames: the other counts gaps (`micGaps` on the server, `rxGaps` on the speaker).
+- **Text frames:** `talk_start` and `talk_stop` go on the link (in order with the audio); the speaker sends `{"type":"ping"}` after 15 s of sending nothing; the server sends `{"type":"ka"}` every 5 s (backend from 2026-10-18).
+- **Staying alive:** the server pings every 5 s and closes a link that misses 2 (10-15 s). If more than about 1 s of talk audio is waiting to go, new audio is dropped; stuck like that for 3 s, the server closes the link. The speaker's WebSocket library answers pings itself and never shows them, so from 0.33.0 it watches `ka` instead: once one has come, 30 s with nothing from the server makes it reconnect. It retries every 2 s.
+- **Fallback:** while the link is down, mic audio goes to `ss/dev/<id>/mic` and talk to `ss/dev/<id>/audio` (raw PCM, section 1b and 4).
 
 ## 5. Alarms
 
@@ -250,6 +265,7 @@ device: saves the list in flash → alarms_ack {version, count}
 | `board` | Chip type (`esp32s3`, `esp32`): which firmware file fits |
 | `time` | Device's local time `YYYY-MM-DD HH:MM:SS`, or `""` until the first internet time sync |
 | `tz` | Device's time zone name |
+| `audio` | (0.32.0+) Counters for the audio path, totals since boot: `talkDrops` (talk buffer full), `talkStarves` (talk ran dry), `talkPeak` (most samples ever waiting), `talkSkips` (0.33.0+, skipped ahead after a burst), `underruns` (output blocks short of audio while talk played; only right from 0.33.0), `inboxDrops`, `outboxDrops` (mic pieces the link couldn't take), `linkDowns`, `sendMaxMs` (slowest link send), `rxGaps` (talk frames missing). The server's side of the link: `GET /api/v1/devices/:id/audio-stats`; round trip through the speaker: `POST /api/v1/devices/:id/latency-probe` (owner) |
 
 ### 6.2 `partitions`
 

@@ -1,6 +1,17 @@
 # Audio plan: reliable, lower-delay, full-duplex two-way voice (and a cleaner mic)
 
-Status: Phase 0 done and merged to main (2026-10-18). Next: Phase 1. Work happens on branch `feat/audio-duplex`; each tested phase is merged to main and pushed. See also [protocol.md](protocol.md) (its audio sections predate the audio link).
+Status (2026-10-18, evening): Phases 0 and 1 done, tested, merged to main and deployed to the cloud, plus a round of Momo fixes (see "Momo fixes" below). Next: Phase 2 (full-duplex calls). Work happens on branch `feat/audio-duplex` in all four repos; each tested step is fast-forwarded into main and pushed.
+
+Deployed on the cloud: backend `8101c34`, web `5856910`, speaker firmware 0.34.0 (flashed over USB with the cloud `secrets.h`). App `5b95393` (built by the owner on the Mac).
+
+**How we work on this (keep to it):**
+- One phase or fix at a time; the owner tests each locally or on the cloud before the next. Don't start the next phase without them.
+- Branch `feat/audio-duplex` in all four repos; after the owner's OK: commit, push, `git merge --ff-only` into `main`, push `main`.
+- Run the backend e2e suite before every deploy: `npx jest --config test/jest-e2e.json --runInBand` (needs `docker compose up -d` in `smart-speaker-backend`).
+- Local testing: backend `npm run start:dev`, web `npm run dev`, EMQX and Postgres in Docker; `firmware/secrets.h` `MQTT_URI` set to the PC's LAN address (check `ipconfig`, it changes); flash with `./fw.sh upload COM11` (BOOT + RESET if it won't connect). The owner runs the app on a Mac and sets its `.env` himself. API docs only load at `http://localhost:4000/api/docs` (a LAN address is upgraded to https).
+- Cloud deploy: back up first (database dump and the `speaker_storage` volume), `git archive <commit> | ssh … 'tar -x -C ~/speaker'`, `docker compose -f docker-compose.prod.yml up -d --build backend`; web: `npm run build`, then replace `~/speaker/web`. Switch `secrets.h` back to the cloud line before a cloud firmware build. Check the speaker's `audio link up` in `docker logs speaker-backend-1`.
+- Reading results: Momo's timings are in the backend log ("AI ready", "answer started … after their turn", "<tool> took … on the speaker: …"); conversations in the `VoiceLog` table; the speaker's audio counters in `GET /api/v1/devices/:id/audio-stats`.
+- No barge-in (the owner rejected interrupting Momo by voice). Full duplex is for calls only. See also [protocol.md](protocol.md) (its audio sections predate the audio link).
 
 ## Context
 
@@ -63,19 +74,51 @@ Notes:
 2. **Faster ack.** `realtime.gateway.ts` `talkStart`: ack right after `hub.send(talk_start)`. `callLog.create` runs fire-and-forget with error logging.
 3. **Fast dead-link detection.** `PING_MS` 20 s to 5 s; terminate after 2 missed pongs (10-15 s). `MAX_BUFFERED` 64 KB to about 1 s of audio. Terminate if over the limit for more than 3 s.
 4. **Firmware receive watchdog.** In `linkTask`, if nothing arrives for 30 s while up, drop and reconnect. First verify the IDF WebSocket transport answers ping frames; if not, use an app-level ping/pong. Log the failing stage on every reconnect (TLS allocation, login, `netConnected`).
-5. **Downlink buffers** (`config.h`, `audio.cpp`): `TALK_PREBUFFER` 3000 to 2000 (125 ms), `PLAY_RING` 2048 to 1024 (64 ms). Do not change the I2S TX DMA (4 x 256): `AEC_DELAY_CAL 1318` was measured with it. Catch-up rule in `talkPush`: when more than 400 ms is waiting while playing, drop the oldest down to 200 ms and count it.
+5. **Downlink buffers** (`config.h`, `audio.cpp`): `TALK_PREBUFFER` 3000 to 2000 (125 ms), `PLAY_RING` 2048 to 1024 (64 ms). Do not change the I2S TX DMA (4 x 256): `AEC_DELAY_CAL 1318` was measured with it. Catch-up rule in `talkPush`: when more than 500 ms is waiting while playing (`TALK_CATCHUP_AT`), drop the oldest down to 250 ms (`TALK_CATCHUP_TO`) and count it (`talkSkips`). 500 ms, not 400: over MQTT the server keeps up to 375 ms of the AI's voice ahead on purpose.
 6. **Web talk start** (`smart-speaker-web/src/live/talk.ts`): pre-warm `AudioContext` and the worklet on the device page. On press, run `talk_start` and `getUserMedia` in parallel and keep early chunks (max 8) until the ack, as the app already does. Set `autoGainControl` explicitly. Flush the last partial chunk on release.
 7. **Client room playback** (`web listen.ts`, app `roomPlayer.ts` / `roomPlayer.web.ts`): start lookahead 250 to 120 ms. After an underrun add 40 ms, up to 250 ms, and let it decay. If more than 500 ms is scheduled ahead, skip pieces (counted) so delay can't grow forever.
 
 Acceptance: round-trip probe improves by about 150-250 ms against baseline; `underruns` and `talkStarves` do not rise in a 5-minute call; link back within 15 s of a backend restart; three AI conversations still work (they use the same talk path).
 
+### Phase 1 results (2026-10-18, done)
+
+Built as planned, with these details:
+- Backend: on the audio link talk goes on as it comes; the AI's voice in 40 ms pieces, 240 ms ahead (`LINK_PACE`; MQTT keeps 125 ms pieces, 375 ms ahead). Pings every 5 s, closed after 2 missed; about 1 s of audio may wait (`MAX_BUFFERED` 4 KB Opus, 32 KB PCM); a link backed up for 3 s is closed. The server also sends a text keep-alive `{"type":"ka"}` every 5 s.
+- Firmware 0.33.0: the speaker's WebSocket library answers pings itself and never shows them, so it watches for `ka` instead and reconnects after 30 s of silence (only once a `ka` has come, so an older server doesn't make it drop).
+- Web: talk audio context and worklet load with the device page; mic and server ok start together; the last part chunk is sent on release. Web and app: room audio starts 120 ms behind, adds 40 ms after each dry spell (up to 250 ms), and skips pieces when more than 500 ms behind (`playClock.ts`, the same file in web and app).
+- Owner's test, local then cloud: "looks faster"; the 1.5-2 s first-listen delay in the app is gone. The probe was not re-run after Phase 1 (baseline 255 ms).
+
+## Momo fixes (2026-10-18, done, deployed)
+
+Found in the cloud conversation log (`VoiceLog`) and the timing lines added to the backend log:
+
+| Problem | Cause | Fix |
+|---|---|---|
+| Momo repeated an answer | each tool result went back to Gemini on its own, and it speaks after each | results of calls made together go back in one reply (`gemini.ts`, `Batch`) |
+| Momo stopped mid-sentence ~10 s, then went on | a noise "turn" while it was preparing an answer cut that answer | a turn is held on the server until it ends; only a real one cuts the old answer; 300 ms hush after it (`HUSH_MS`) |
+| Momo answered noise ("জি, আমি শুনছি") | the speaker's detector is loudness only | turns with under 200 ms of sound never reach Gemini (`MIN_SPEECH_MS`; firmware 0.34.0 reports `speech` ms in `turn done`, and `turn_again` sends it back to listening without a beep); `ignore_noise` tool; 3 in a row end the conversation quietly (`NOISE_END`) |
+| Bulk requests: "can't set many at once", 6.8 s for 5 alarms | no way to do several; one sync and speaker save per alarm | calls made together run one after another and send the speaker one list (`AlarmsService.hold/release`); `set_reminder` takes `count` + `every_minutes` (times worked out on the server); `delete_alarms` with `all: true` or `ns`; new alarms answer their number `n` |
+| "Is it really done?" | database writes were awaited, the speaker was not | alarm tools answer `onSpeaker` after waiting up to 3 s for `alarms_ack`; the prompt forbids claiming success without `ok` |
+| More than 20 alarms would never ring | the speaker keeps 20 (`MAX_ALARMS` in firmware) | `set_reminder` refuses past 20 and says how many fit |
+
+Timings (cloud, owner's test): Gemini ready 0.8-0.9 s after the wake; a simple answer starts 1.0-2.0 s after the turn (plus the 0.7 s end-of-speech wait); "5 alarms every 30 min" 4.1 s (was 6.8 s; the tool itself 1.1 s), "10 more every 45 min" 4.0 s (tool 0.26 s); deleting 5 chosen alarms 4.2 s (needs list_alarms first). The rest is Gemini thinking (~2 s) and starting to speak (~1 s), plus the speaker confirmation (0.3-1 s; could be made non-blocking if speed matters more than the confirmation).
+
+Tests: the e2e suite had been failing since the held-turn change and was not run before those deploys. It now reflects the new behaviour and covers batches, series, the 20-alarm limit, delete all, noise and short turns: 14 suites, 111 tests pass (`npx jest --config test/jest-e2e.json --runInBand`, needs `docker compose up -d`). Run it before every deploy.
+
+### Open after the Momo fixes
+
+1. A false wake at 16:33 UTC was answered in Spanish ("Hola, estoy muy bien…") instead of `not_for_me`. Tighten Momo's prompt: Bangla only, and silence for anything after a wake that isn't clearly addressed to it.
+2. Stray single words ("A") still sometimes get "জি, কিছু বলবেন?". Left for the local model the ML engineer is training.
+3. One conversation ended `unavailable` at 16:07 UTC (Gemini unreachable); its logs were lost with the container. Watch for it.
+4. The speaker's `underruns` counter fix (count only while talk is on) is in firmware 0.33.0+; the latency probe should be re-run to measure Phase 1 (`POST /api/v1/devices/:id/latency-probe`).
+
 ## Phase 2: full-duplex calls
 
 Firmware:
 1. `MicSession` (`mic.h`) and `firmware.ino:74`: add `fd` (bool), `ns` (0-3), `agc` (bool). Parse `doc["fd"]|false`, `doc["ns"]|0`, `doc["agc"]|false`.
-2. `mic.cpp:306`: `aecOn = (s.aec || s.fd || (s.conversation && BARGE_IN)) && snapSteady != INT32_MIN && aecReady()`.
-3. `mic.cpp:400` gate becomes `((s.live || s.conversation) && !aecOn) && !echoFree`. With AEC on, call audio keeps flowing while the speaker plays. If AEC is not ready, it falls back to today's half-duplex, and `mic_done` says so.
-4. Barge-in logic only for conversations: `strict = aecOn && playing && s.conversation` (`mic.cpp:214`).
+2. `mic.cpp`, where a new session starts (the line `aecOn = (s.aec || (s.conversation && BARGE_IN)) && …`): add `s.fd`, i.e. `aecOn = (s.aec || s.fd || (s.conversation && BARGE_IN)) && snapSteady != INT32_MIN && aecReady()`.
+3. `mic.cpp`, the per-sample gate `if ((s.live || (s.conversation && !aecOn)) && !echoFree)`: becomes `if ((s.live || s.conversation) && !aecOn && !echoFree)`. With AEC on, call audio keeps flowing while the speaker plays. If AEC is not ready, it falls back to today's half-duplex, and `mic_done` says so.
+4. Barge-in logic only for conversations: in `capture()`, `bool strict = aecOn && playing;` becomes `aecOn && playing && s.conversation`.
 5. The wake word stays gated by `echoFree`, so it can't fire on the far end's voice.
 6. Tune with the existing echo test (`mic-test` with echo and aec) at volume 40, 70 and 100, with fan and TV on. Options: `AEC_MODE_FD_HIGH_PERF` (13.6 vs 10.1 ms per chunk), `filter_length` 4 to 6, NLP `AGGR` to `MODERATE`, or split linear and NLP. Target: at least 25 dB at volume 70 with the caller still clear.
 7. Only if step 6 is not enough: a soft residual guard. While far-end audio plays and the cancelled-to-raw ratio says "mostly echo", attenuate the sent audio by 12 dB with a 100 ms release. Never a full mute.

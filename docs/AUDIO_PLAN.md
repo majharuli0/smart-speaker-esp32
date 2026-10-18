@@ -1,6 +1,6 @@
 # Audio plan: reliable, lower-delay, full-duplex two-way voice (and a cleaner mic)
 
-Status: approved 2026-10-18. Phase 0 in progress. Companion notes: [VOICE_STREAMING.md](VOICE_STREAMING.md) (how voice streams today) and [protocol.md](protocol.md).
+Status: Phase 0 done and merged to main (2026-10-18). Next: Phase 1. Work happens on branch `feat/audio-duplex`; each tested phase is merged to main and pushed. See also [protocol.md](protocol.md) (its audio sections predate the audio link).
 
 ## Context
 
@@ -35,7 +35,27 @@ Backend:
 - `audio-link.service.ts`: per-link counters: mic frames in, mic `seq` gaps, talk messages out, bytes dropped by `MAX_BUFFERED`, peak `bufferedAmount`, Opus decode time. One log line every 60 s while a link is up, and one on close.
 - Round-trip probe (owner only, next to mic-test): the server sends a short click burst to the speaker and records with `mic.record`. The estimated capture time of the burst (arrival time of its piece minus the samples after it) minus the send time gives the round trip through the speaker's audio path. Five runs, median and max.
 
-Test batch A (you, once): 5-minute call each way on Wi-Fi at your usual spot; one run with the router far away; stop and restart the backend for 2 minutes (watch link recovery and the serial log); probe five times. Save the numbers next to the budget table in VOICE_STREAMING.md.
+Test batch A (you, once): 5-minute call each way on Wi-Fi at your usual spot; one run with the router far away; stop and restart the backend for 2 minutes (watch link recovery and the serial log); probe five times.
+
+### Phase 0 results (2026-10-18, done)
+
+Built and tested on the local network: backend, web and EMQX on the PC (192.168.0.104), speaker on firmware 0.32.0, app on the Mac. Not yet measured on the cloud.
+
+| Measure | Result |
+|---|---|
+| Round trip through the speaker (latency probe, 5 runs) | **255 ms** median (241-259) |
+| Server to speaker audio | 0 missing, 0 dropped, 0 frame gaps; Opus decode 0.2 ms avg |
+| Talk playback ran dry (`talkStarves`) | 3 |
+| Most talk audio waiting (`talkPeak`) | 5,120 samples (320 ms) |
+| Mic pieces dropped on the speaker (`outboxDrops`) | **48** (about 6 s). Cause not confirmed: two backend restarts during the test, or the wake word's pre-roll burst |
+| Speaker back after a backend restart | about 1 s after the server is reachable (clean restart only; a silent network loss is not tested) |
+| App, first "Hear the room" after opening | 1.5-2 s delay that stays for the call; gone on the second try (phone-side backlog: Phase 1 step 7) |
+
+Notes:
+- Noise and buffering sounded better than on the cloud. Phase 0 changed no audio behaviour, so this is the local network, not a fix.
+- The `underruns` counter counted idle silence (`talkPlaying` stays true after a talk ends). Fixed in the code (it now also needs `talking`), but the speaker runs the old build until the next flash. Ignore `underruns` from 0.32.0.
+- The round trip covers the speaker only: not the phone legs, not the server's 125 ms talk batch, not the cloud.
+- Local testing: `firmware/secrets.h` points MQTT at the PC; switch it back to the cloud line before a cloud build. The API docs page only loads at `http://localhost:4000/api/docs` (a LAN IP is upgraded to https by the security headers). The speaker may need BOOT + RESET to accept a USB upload.
 
 ## Phase 1: latency and reliability quick wins
 

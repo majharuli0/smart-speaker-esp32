@@ -4,6 +4,7 @@
 #include "audio.h"
 #include "ota.h"
 #include "mic.h"
+#include "buttons.h"
 
 // A color and how it moves: steady, blink (on half the period) or pulse (fades up and down)
 enum Pattern : uint8_t { STEADY, BLINK, PULSE };
@@ -26,6 +27,7 @@ static const Look DOORBELL = {0, 255, 255, BLINK, 250};
 static const Look SETUP = {0, 0, 255, BLINK, 2000};
 static const Look OFFLINE = {255, 0, 0, BLINK, 2000};
 static const Look CONNECTING = {255, 160, 0, BLINK, 600};
+static const Look SOS = {255, 0, 0, BLINK, 300};  // fast red: the SOS button (buttons.h)
 static const Look ONLINE = {0, 40, 0, STEADY, 0};  // dim green
 
 static volatile unsigned long identifyUntil = 0;
@@ -41,6 +43,7 @@ static Look pick(unsigned long now) {
   bool online = netConnected();
   if (online) lastOnline = now;
   if (otaRunning()) look = UPDATING;
+  else if (buttonsSos()) look = SOS;
   else if (micBusy()) {  // always shown while the mic is on (privacy)
     MicState m = micState();
     // A call stays pink from start to end, whether or not the caller is talking

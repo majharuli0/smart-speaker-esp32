@@ -13,6 +13,7 @@
 //            voice requests, the room during a call); the rest goes to wake
 //   wake   - the wake word, matched on the speaker (wakecore: the matching itself)
 //   audiolink - live audio over its own WebSocket (MQTT carries it while that's down)
+//   buttons - STOP · SOS and MOMO
 // Messages are documented in docs/protocol.md.
 #include <ArduinoJson.h>
 #include "config.h"
@@ -28,6 +29,7 @@
 #include "led.h"
 #include "mic.h"
 #include "wake.h"
+#include "buttons.h"
 #include "audiolink.h"
 
 static void onConnected() {
@@ -67,6 +69,8 @@ static void onCommand(uint8_t *payload, size_t length) {
   else if (cmd == "alarms_sync") { alarmsSync(doc); cacheSync(doc["tones"]); }
   else if (cmd == "timezone") setTimezone(doc["tz"] | "", doc["name"] | "");
   else if (cmd == "doorbell") chimeStart();
+  else if (cmd == "sos_sent") buttonsSosSent(doc["people"] | 0);
+  else if (cmd == "momo_failed") cueStart(true);  // the MOMO button, but Momo can't now
   else if (cmd == "ota_start") otaStart(doc);
   else if (cmd == "reset_wifi") resetWifi();
   else if (cmd.startsWith("files_")) filesCommand(doc);
@@ -100,6 +104,7 @@ void setup() {
   statsSetup();
   alarmsSetup();
   micSetup();
+  buttonsSetup();
   netSetup({onConnected, onCommand, onAudio});
   audioLinkSetup();
   timeSetup();
@@ -117,6 +122,7 @@ void loop() {
   otaLoop();
   wakeLoop();
   micLoop();
+  buttonsLoop();
 
   // Let core 1's idle task run, so CPU load reads true (and the chip runs cooler).
   // Safe for audio: each pass moves 16 ms of sound and the I2S queue holds 128 ms.

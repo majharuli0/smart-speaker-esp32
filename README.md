@@ -138,6 +138,17 @@ INMP441 microphone (I2S, the second port; **3.3 V only**). Keep its wires short 
 | SD | GPIO 9 |
 | L/R | GND (left channel) |
 
+A second INMP441 can share the same SCK, WS and SD wires with its L/R pin to **3V3** (right
+channel): the speaker uses the quieter of the two, and the mic test can record either or both.
+
+Buttons (firmware 0.37.0+): two push buttons, each between its pin and **GND** (no resistor:
+the internal pull-up is used).
+
+| Button | ESP32-S3 | What it does |
+|---|---|---|
+| STOP · SOS (red) | GPIO 1 | Press: stops an alarm, reminder, music, Momo or a call. Hold 3 s: SOS, the family is alerted and their apps ring |
+| MOMO | GPIO 2 | Press: Momo listens (like the wake word) |
+
 DS3231 clock module (I2C, optional): keeps the time through power cuts, so alarms ring without
 internet. With a plain CR2032 battery on the common ZS-042 board, remove its charging diode or resistor.
 

@@ -3,7 +3,7 @@
 #include <Arduino.h>  // board definitions (CONFIG_IDF_TARGET_*)
 
 // ---- Firmware version: bump on every release (shown on the web page) ----
-#define FW_VERSION "0.36.1"
+#define FW_VERSION "0.37.0"
 
 // ---- Broker address and device secret: in secrets.h, which is not in git ----
 #if __has_include("secrets.h")
@@ -48,6 +48,17 @@
 #define LED_ONLINE_MS   10000  // green this long after anything else showed, then dark
 #define LED_OFFLINE_MS  30000  // can't reach the server this long: red instead of yellow
 #define LED_IDENTIFY_MS 4000   // "find my speaker" flashing
+
+// Buttons (buttons.h): each between its pin and GND, the internal pull-up holds it high.
+// GPIO 1 and 2 are free, and not boot pins.
+#define BTN_STOP_GPIO     1      // STOP · SOS
+#define BTN_MOMO_GPIO     2      // MOMO
+#define BTN_DEBOUNCE_MS   30
+#define BTN_SHORT_MS      1000   // a press, not a hold (MOMO)
+#define SOS_HOLD_MS       3000   // STOP held this long: SOS
+#define SOS_RETRY_MS      5000   // not answered yet: sent again this often…
+#define SOS_RETRY_FOR_MS  600000 // …for up to 10 minutes (offline: it goes when back)
+#define SOS_SHOW_MS       30000  // red blinking this long after it went
 
 // ---- Audio ----
 #define SAMPLE_RATE 16000     // tones are converted to 16 kHz 16-bit mono WAV by the web page

@@ -23,6 +23,7 @@ struct MicSession {
   bool aec;          // the recording goes through echo cancellation (ESP-SR) first (being measured)
   bool fd;           // a call in full duplex: echo cancelled, and the room is sent while the speaker plays too
   int ns;            // 0, or the sent audio goes through noise suppression: 1 mild, 2 medium, 3 strong (dsp.h)
+  int mic;           // which mic (two can share the port): 0 the quieter, 1 left, 2 right, 3 both averaged
 };
 
 enum MicState { MIC_OFF, MIC_LISTENING, MIC_THINKING };

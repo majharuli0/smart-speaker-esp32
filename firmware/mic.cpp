@@ -14,6 +14,9 @@ static const size_t BLOCK = 256;              // frames per I2S read (16 ms)
 
 static const uint32_t WINDOW = SAMPLE_RATE / 20;     // 50 ms: the step for telling speech from quiet
 static const uint32_t SETTLE = SAMPLE_RATE * 3 / 10;  // after power-on: the mic waking up, and its start-up thump
+static const uint32_t SLOT_LEARN = SAMPLE_RATE * 2;   // after that: which slot has a mic, and the quieter (micTask)
+static const float SLOT_DEAD = 100;                   // a slot's quietest 50 ms below this (rms 10 of 24 bits): no mic
+static const float SLOT_FLOATING = 7e10f;             // above this (-30 dBFS while the room is quiet): a floating line
 static const uint32_t ECHO = SAMPLE_RATE / 5;         // after the speaker's own sound: what's still queued, and the room's echo
 static const uint32_t CUE_GAP = SAMPLE_RATE / 10;     // a recording starts this long after its cue
 
@@ -45,8 +48,9 @@ static const uint32_t BARGE_GRACE_MS = 800;
 static volatile bool bargeIn = false;  // the person spoke over the AI: the main loop cuts it (talkStop)
 static volatile bool againAsked = false;  // the server's turn_again (main loop → mic task)
 
-// The mic answers in one slot of each stereo frame (which one, its L/R pin
-// decides): both are read, and the louder one is kept
+// A mic answers in one slot of each stereo frame (which one, its L/R pin
+// decides); two mics can share the port, one in each. Both slots are read
+// (micTask picks which to use)
 static bool portStart() {
   i2s_config_t config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
@@ -73,6 +77,8 @@ static bool portStart() {
 }
 
 static float dbfs(float v) { return v > 0 ? 20 * log10f(v / 32768) : -120; }
+// A slot's power (24-bit units) in dB of the mic's full scale
+static float slotDb(float p) { return p > 0 ? 10 * log10f(p / (8388608.0f * 8388608.0f)) : -120; }
 
 // The last few seconds the mic heard (PSRAM). After the wake word the server's
 // mic_record says afterWake, and the recording starts where the word started:
@@ -145,10 +151,16 @@ static bool wakeFresh() { return ring && bandRing && wakeTime && millis() - wake
 static void micTask(void *) {
   static int32_t frames[2 * BLOCK];  // [left, right, left, right, …]
   static int16_t piece[PIECE];
-  uint64_t energyL = 0, energyR = 0;  // which slot the mic answers in: the first second decides
-  uint32_t sampled = 0;
-  bool right = false;
-  int32_t dc = 0;                     // the mic's DC offset (x16), a slow average
+  // Which slot to use. For 2 s after power-on each slot's quietest 50 ms is
+  // measured: a slot with no mic reads (almost) nothing, a floating line reads
+  // noise near full scale; of the slots in between (a mic), the quieter one is
+  // used (a mic picking up interference, e.g. ticks, is the louder one). A mic
+  // test can ask for one, or both averaged (s.mic)
+  float slotSum[2] = {}, slotFloor[2] = {-1, -1};  // 50 ms window power (24-bit units), its quietest
+  float slotQuiet[2] = {-1, -1};                    // the same over this session (mic_done)
+  uint32_t slotCount = 0, learning = SLOT_LEARN;
+  int pick = 0;                       // 0 left, 1 right
+  int32_t dc[2] = {};                 // each slot's DC offset (x16), a slow average
   bool first = true;
   uint32_t settle = SETTLE;
   uint32_t speakerQuiet = 0;          // samples since the speaker last made a sound
@@ -191,7 +203,7 @@ static void micTask(void *) {
   uint32_t barges = 0;
   uint32_t turnMs = 0;  // in this turn (waiting, speaking or thinking)
   bool idleEnded = false;
-  char json[360];
+  char json[420];
 
   // speechMs: at the end of a turn, how long they spoke (the server ignores a
   // turn with too little sound in it); -1 at its start
@@ -356,6 +368,7 @@ static void micTask(void *) {
       nsOn = s.ns > 0 && nsIn && !s.wakeTake && !s.wakeTest && dspStart(s.ns);
       nsUsed = nsOn ? s.ns : 0;
       nsFill = 0;
+      slotQuiet[0] = slotQuiet[1] = -1;
       aecFill = 0;
       aecUs = aecChunks = 0;
       echoPeak = 0;
@@ -384,14 +397,6 @@ static void micTask(void *) {
         snapWindow = INT32_MIN;
         snapReads = 0;
       }
-    }
-    if (sampled < SAMPLE_RATE) {
-      for (size_t i = 0; i < n; i++) {
-        energyL += abs(frames[2 * i] >> 8);
-        energyR += abs(frames[2 * i + 1] >> 8);
-      }
-      sampled += n;
-      right = energyR > energyL;
     }
     // The speaker's own sound mustn't be taken for the room: the wake word
     // listener pauses, and a call's room audio isn't sent (no echo of the caller)
@@ -427,11 +432,36 @@ static void micTask(void *) {
     }
 
     for (size_t i = 0; i < n; i++) {
-      int32_t x = frames[2 * i + (right ? 1 : 0)] >> 8;  // the mic's 24-bit sample
-      if (first) { dc = x << 4; first = false; }
-      dc += ((x << 4) - dc) >> 10;  // ~2.5 Hz: follows the offset, not the voice
-      int32_t y = (x - (dc >> 4)) >> MIC_GAIN_SHIFT;
+      int32_t v[2];  // each slot's 24-bit sample, less its offset
+      for (int k = 0; k < 2; k++) {
+        int32_t x = frames[2 * i + k] >> 8;
+        if (first) dc[k] = x << 4;
+        dc[k] += ((x << 4) - dc[k]) >> 10;  // ~2.5 Hz: follows the offset, not the voice
+        v[k] = x - (dc[k] >> 4);
+      }
+      first = false;
       if (settle) { settle--; continue; }
+      for (int k = 0; k < 2; k++) slotSum[k] += (float)v[k] * v[k];
+      if (++slotCount == WINDOW) {
+        for (int k = 0; k < 2; k++) {
+          float p = slotSum[k] / WINDOW;
+          if (learning && (slotFloor[k] < 0 || p < slotFloor[k])) slotFloor[k] = p;
+          if (on && capturing && !playing && (slotQuiet[k] < 0 || p < slotQuiet[k])) slotQuiet[k] = p;
+          slotSum[k] = 0;
+        }
+        slotCount = 0;
+      }
+      if (learning && --learning == 0) {
+        bool mic0 = slotFloor[0] > SLOT_DEAD && slotFloor[0] < SLOT_FLOATING;
+        bool mic1 = slotFloor[1] > SLOT_DEAD && slotFloor[1] < SLOT_FLOATING;
+        pick = mic0 && mic1 ? (slotFloor[1] < slotFloor[0] ? 1 : 0) : mic1 ? 1 : 0;
+        Serial.printf("Microphones: left %s (%.1f dBFS), right %s (%.1f dBFS); using the %s\n",
+                      mic0 ? "on" : "none", slotDb(slotFloor[0]), mic1 ? "on" : "none", slotDb(slotFloor[1]),
+                      pick ? "right" : "left");
+      }
+      // The session's choice (a mic test), else the quieter mic
+      int use = on && s.mic >= 1 && s.mic <= 3 ? s.mic - 1 : pick;
+      int32_t y = (use == 2 ? (v[0] + v[1]) / 2 : v[use]) >> MIC_GAIN_SHIFT;
       bool over = y > 32767 || y < -32768;
       y = constrain(y, -32768, 32767);
       float banded = band.push(y);
@@ -502,8 +532,12 @@ static void micTask(void *) {
                          "{\"type\":\"mic_done\",\"samples\":%lu,\"pieces\":%lu,\"dropped\":%lu,\"clipped\":%lu,"
                          "\"slot\":\"%s\",\"gainShift\":%d,\"speech\":%s,\"endedBy\":\"%s\",\"floorDb\":%.1f",
                          (unsigned long)total, (unsigned long)pieces, (unsigned long)dropped, (unsigned long)clipped,
-                         right ? "right" : "left", MIC_GAIN_SHIFT, heard ? "true" : "false", endedBy,
+                         s.mic == 3 ? "both" : (s.mic >= 1 && s.mic <= 2 ? s.mic - 1 : pick) ? "right" : "left",
+                         MIC_GAIN_SHIFT, heard ? "true" : "false", endedBy,
                          floor > 0 ? 10 * log10f(floor / (32768.0f * 32768.0f)) : -120.0f);
+      // Each slot's quietest 50 ms in this session (the room and that mic's own noise)
+      len += snprintf(json + len, sizeof(json) - len - 2, ",\"slots\":{\"left\":%.1f,\"right\":%.1f}",
+                      slotDb(slotQuiet[0]), slotDb(slotQuiet[1]));
       len += wakeSessionEnd(json + len, sizeof(json) - len - 2);  // a wake word take or test: its result
       uint32_t tx;
       if (s.echoTest && sweepTxIndex(&tx))
@@ -571,6 +605,7 @@ bool micRecord(const MicSession &s) {
   asked.endSilenceMs = s.live ? 0 : constrain(s.endSilenceMs, 0, 5000);
   asked.idleMs = constrain(s.idleMs, 0, 60000);
   asked.ns = constrain(s.ns, 0, 3);
+  asked.mic = constrain(s.mic, 0, 3);
   toneStop();               // a quiet room: nothing plays while it listens…
   if (!s.live) talkStop();  // …except, in a call, the caller
   // A call: "connected" (three rising notes; falling when it ends). A voice

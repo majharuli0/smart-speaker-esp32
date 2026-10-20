@@ -79,6 +79,8 @@ account, brings it back to Bluetooth setup. Alarms keep working while it waits.
 
 Board: **ESP32-S3-WROOM-1 N16R8** (16 MB flash, 8 MB PSRAM). The firmware only builds for this board.
 
+The full wiring diagram, on the board's real pin order, is [docs/wiring.html](docs/wiring.html) (open it in a browser). The tables below say the same per part.
+
 Amp wiring (MAX98357A; GAIN to GND for 12 dB of gain, SD unconnected):
 
 | Amp pin | ESP32-S3 |

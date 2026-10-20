@@ -35,6 +35,7 @@ figure { margin: 0; background: var(--panel); border: 1px solid var(--line); bor
 .scroll { overflow-x: auto; }
 svg.sch { display: block; width: 100%; min-width: 980px; height: auto; color: var(--fg); }
 figcaption { color: var(--muted); font-size: 14px; max-width: 90ch; }
+a { color: var(--amp); text-underline-offset: 2px; }
 .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .sw { width: 18px; height: 3px; border-radius: 2px; display: inline-block; }
@@ -95,7 +96,7 @@ code { font-family: var(--mono); font-size: 13px; }
 
   <figure>
     <div class="scroll">
-      <svg class="sch" viewBox="40 95 1260 745" role="img" aria-label="Wiring of the ESP32-S3 DevKit: MAX98357A amp on GPIO 4, 5, 6; two INMP441 mics sharing GPIO 7, 8, 9; RGB LED on GPIO 15, 16, 17 through 300 ohm resistors; microSD on GPIO 10 to 13; STOP button on GPIO 1 and MOMO on GPIO 2 to ground; DS3231 clock on GPIO 47 (SCL) and 21 (SDA).">
+      <svg class="sch" viewBox="40 95 1260 745" role="img" aria-label="Wiring of the ESP32-S3 DevKit: MAX98357A amp on GPIO 4, 5, 6; two INMP441 mics sharing GPIO 7, 8, 9; RGB LED on GPIO 15, 16, 17 through 330 ohm resistors; microSD on GPIO 10 to 13; STOP button on GPIO 1 and MOMO on GPIO 2 to ground; DS3231 clock on GPIO 47 (SCL) and 21 (SDA).">
         <defs>
           <g id="pill-3v3"><rect x="-18" y="-8" width="36" height="16" rx="8" class="p3f"/><text x="0" y="3.5" text-anchor="middle" class="pillt">3V3</text></g>
           <g id="pill-5v"><rect x="-18" y="-8" width="36" height="16" rx="8" class="p5f"/><text x="0" y="3.5" text-anchor="middle" class="pillt">5V</text></g>
@@ -192,18 +193,18 @@ code { font-family: var(--mono); font-size: 13px; }
         <rect x="482" y="160" width="26" height="16" class="box"/>
         <polygon points="482,160 508,160 524,134 466,134" class="box"/>
         <text x="456" y="150" text-anchor="end" class="bt">Speaker</text>
-        <text x="456" y="166" text-anchor="end" class="bs">4–8 Ω · 3 W</text>
+        <text x="456" y="166" text-anchor="end" class="bs">4 Ω · 5 W</text>
 
-        <!-- ===== RGB LED: R 15, G 16, B 17, each through 300 Ω ===== -->
+        <!-- ===== RGB LED: R 15, G 16, B 17, each through 330 Ω ===== -->
         <line x1="656" y1="360" x2="615" y2="360" class="w lr"/>
         <line x1="656" y1="390" x2="615" y2="390" class="w lg"/>
         <line x1="656" y1="420" x2="615" y2="420" class="w lb"/>
         <rect x="575" y="354" width="40" height="12" rx="2" class="res lr"/>
         <rect x="575" y="384" width="40" height="12" rx="2" class="res lg"/>
         <rect x="575" y="414" width="40" height="12" rx="2" class="res lb"/>
-        <text x="595" y="350" text-anchor="middle" class="pn">300 Ω</text>
-        <text x="595" y="380" text-anchor="middle" class="pn">300 Ω</text>
-        <text x="595" y="410" text-anchor="middle" class="pn">300 Ω</text>
+        <text x="595" y="350" text-anchor="middle" class="pn">330 Ω</text>
+        <text x="595" y="380" text-anchor="middle" class="pn">330 Ω</text>
+        <text x="595" y="410" text-anchor="middle" class="pn">330 Ω</text>
         <line x1="575" y1="360" x2="522" y2="360" class="w lr"/>
         <line x1="575" y1="390" x2="522" y2="390" class="w lg"/>
         <line x1="575" y1="420" x2="522" y2="420" class="w lb"/>
@@ -336,9 +337,9 @@ code { font-family: var(--mono); font-size: 13px; }
           <tr><td class="pin"><i class="dot" style="background:var(--sd)"></i>11</td><td>microSD MOSI</td></tr>
           <tr><td class="pin"><i class="dot" style="background:var(--sd)"></i>12</td><td>microSD SCK</td></tr>
           <tr><td class="pin"><i class="dot" style="background:var(--sd)"></i>13</td><td>microSD MISO</td></tr>
-          <tr><td class="pin"><i class="dot" style="background:var(--led-r)"></i>15</td><td>300 Ω → LED red leg</td></tr>
-          <tr><td class="pin"><i class="dot" style="background:var(--led-g)"></i>16</td><td>300 Ω → LED green leg</td></tr>
-          <tr><td class="pin"><i class="dot" style="background:var(--led-b)"></i>17</td><td>300 Ω → LED blue leg</td></tr>
+          <tr><td class="pin"><i class="dot" style="background:var(--led-r)"></i>15</td><td>330 Ω → LED red leg</td></tr>
+          <tr><td class="pin"><i class="dot" style="background:var(--led-g)"></i>16</td><td>330 Ω → LED green leg</td></tr>
+          <tr><td class="pin"><i class="dot" style="background:var(--led-b)"></i>17</td><td>330 Ω → LED blue leg</td></tr>
           <tr><td class="pin"><i class="dot" style="background:var(--rtc)"></i>21</td><td>Clock SDA</td></tr>
           <tr><td class="pin"><i class="dot" style="background:var(--rtc)"></i>47</td><td>Clock SCL</td></tr>
           <tr><td class="pin"><i class="dot" style="background:var(--p3)"></i>3V3</td><td>Both mics VDD, Mic B L/R, microSD VCC, clock VCC</td></tr>
@@ -352,16 +353,16 @@ code { font-family: var(--mono); font-size: 13px; }
       <div>
         <h2>Parts</h2>
         <table>
-          <thead><tr><th>Qty</th><th>Part</th></tr></thead>
+          <thead><tr><th>Qty</th><th>Part (where we bought it)</th></tr></thead>
           <tbody>
-            <tr><td class="pin">1</td><td>ESP32-S3-WROOM-1 N16R8 DevKit (16 MB flash, 8 MB PSRAM)</td></tr>
-            <tr><td class="pin">1</td><td>MAX98357A I²S amp + speaker, 4–8 Ω, 3 W</td></tr>
-            <tr><td class="pin">2</td><td>INMP441 I²S microphone</td></tr>
-            <tr><td class="pin">1</td><td>microSD card module (SPI), card in FAT32</td></tr>
-            <tr><td class="pin">1</td><td>DS3231 clock module (ZS-042) + CR2032 battery</td></tr>
-            <tr><td class="pin">1</td><td>RGB LED, common cathode</td></tr>
-            <tr><td class="pin">3</td><td>300 Ω resistor (330 Ω works too)</td></tr>
-            <tr><td class="pin">2</td><td>Push button (STOP · SOS in red, MOMO)</td></tr>
+            <tr><td class="pin">1</td><td><a href="https://store.roboticsbd.com/development-boards/2367-esp32-s3-wroom-1-dual-type-c-usb-n16r8-micropython-board-robotics-bangladesh.html" target="_blank" rel="noopener">ESP32-S3-WROOM-1 N16R8 DevKit</a> (16 MB flash, 8 MB PSRAM, 2 × USB-C)</td></tr>
+            <tr><td class="pin">1</td><td><a href="https://store.roboticsbd.com/electronics-module/2919-max98357a-i2s-dac-class-d-mono-amplifier-module-robotics-bangladesh.html" target="_blank" rel="noopener">MAX98357A I²S amp</a> + speaker, 4 Ω, 5 W</td></tr>
+            <tr><td class="pin">2</td><td><a href="https://store.roboticsbd.com/sensors/1753-inmp441-compatible-omnidirectional-microphone-module-robotics-bangladesh.html" target="_blank" rel="noopener">INMP441 I²S microphone</a></td></tr>
+            <tr><td class="pin">1</td><td><a href="https://store.roboticsbd.com/electronics-module/2759-microsd-card-module-robotics-bangladesh.html" target="_blank" rel="noopener">microSD card module (SPI)</a>, card in FAT32</td></tr>
+            <tr><td class="pin">1</td><td><a href="https://store.roboticsbd.com/date-time-rtc-module/386-precision-real-time-clock-module-ds3231-at24c32-i2c-robotics-bangladesh.html" target="_blank" rel="noopener">DS3231 clock module (ZS-042)</a> + CR2032 battery</td></tr>
+            <tr><td class="pin">1</td><td><a href="https://robodocbd.com/product/rgb-led-5mm" target="_blank" rel="noopener">RGB LED, 5 mm, common cathode</a></td></tr>
+            <tr><td class="pin">3</td><td><a href="https://robodocbd.com/product/330-ohm-1-4w-resistor" target="_blank" rel="noopener">330 Ω resistor, ¼ W</a> (300 Ω works too)</td></tr>
+            <tr><td class="pin">2</td><td><a href="https://robodocbd.com/product/push-switch-2-pin" target="_blank" rel="noopener">Push button, 2-pin</a> (STOP · SOS in red, MOMO)</td></tr>
           </tbody>
         </table>
       </div>

@@ -92,7 +92,7 @@ Amp wiring (MAX98357A; GAIN to GND for 12 dB of gain, SD unconnected):
 | GND | GND |
 | GAIN | GND (12 dB) |
 
-Status light (RGB LED, common cathode: the long leg to GND; each color through its own 300 Ω resistor):
+Status light (RGB LED, common cathode: the long leg to GND; each color through its own 330 Ω resistor (300 Ω works too)):
 
 | LED leg | ESP32-S3 |
 |---|---|

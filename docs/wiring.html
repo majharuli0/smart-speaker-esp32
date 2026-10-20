@@ -381,21 +381,8 @@ code { font-family: var(--mono); font-size: 13px; }
             <tr><td class="pin">1</td><td>RGB LED, common cathode</td></tr>
             <tr><td class="pin">3</td><td>300 Ω resistor (330 Ω works too)</td></tr>
             <tr><td class="pin">2</td><td>Push button (STOP · SOS in red, MOMO)</td></tr>
-            <tr><td class="pin">2 + 2</td><td>100 nF ceramic and 4.7 µF electrolytic capacitor, one of each per mic (on order)</td></tr>
           </tbody>
         </table>
-      </div>
-      <div>
-        <h2>Before you power it</h2>
-        <ul>
-          <li>The mics take <b>3.3 V only</b>. 5V on VDD destroys them.</li>
-          <li>The amp's VIN goes to <b>5V</b>; its GAIN to GND gives 12 dB, and its SD pin stays unconnected.</li>
-          <li>Capacitors, once they arrive: one 100 nF and one 4.7 µF across each mic's VDD and GND, right at the mic pins. On the 4.7 µF, the long (+) leg goes to VDD and the striped leg to GND.</li>
-          <li>Keep the mic wires short and away from the amp and speaker wires: long loose wires are the likely source of the ticks.</li>
-          <li>The microSD module runs on 3V3 unless it has its own regulator, in which case it takes 5V.</li>
-          <li>With a plain (non-rechargeable) CR2032 on the ZS-042 clock board, remove its charging diode or resistor.</li>
-          <li>Upload firmware through the USB-C port labelled COM.</li>
-        </ul>
       </div>
       <div>
         <h2>Pins to leave free</h2>
